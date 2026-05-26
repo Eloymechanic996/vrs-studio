@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>VRS Studio Movil</title>
+  <meta name="theme-color" content="#17322c">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">VRS Studio</p>
+        <h1>Control de sesion movil</h1>
+      </div>
+      <button id="saveLocalBtn" class="ghost">Guardar local</button>
+    </header>
+
+    <nav class="tabbar" aria-label="Secciones">
+      <button class="tab active" data-tab="session">Sesion</button>
+      <button class="tab" data-tab="timing">Tiempos</button>
+      <button class="tab" data-tab="setup">Setup</button>
+      <button class="tab" data-tab="export">Exportar</button>
+    </nav>
+
+    <main>
+      <section class="panel active" id="panel-session">
+        <div class="card">
+          <h2>Datos generales</h2>
+          <div class="grid">
+            <label>Modalidad<select id="modalidad"></select></label>
+            <label>Categoria<input id="categoria" type="text"></label>
+            <label>Tipo de sesion<select id="tipoSesion"></select></label>
+            <label>Campeonato<input id="campeonato" type="text"></label>
+            <label>Equipo<input id="equipo" type="text"></label>
+            <label>Evento<input id="evento" type="text"></label>
+            <label>Circuito<input id="circuito" type="text"></label>
+            <label>Fecha<input id="fecha" type="date"></label>
+            <label>Piloto<input id="piloto" type="text"></label>
+            <label>Dorsal<input id="dorsal" type="text"></label>
+            <label>Mecanico<input id="mecanico" type="text"></label>
+            <label>Chasis<input id="chasis" type="text"></label>
+            <label>Motor<input id="motorNombre" type="text"></label>
+            <label>Clima<select id="clima"></select></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Observaciones</h2>
+          <textarea id="sessionNotes" rows="6" placeholder="Notas generales de la sesion"></textarea>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-timing">
+        <div class="card timer-card">
+          <p class="timer-label">Cronometro</p>
+          <div id="timerDisplay" class="timer-display">00:00.000</div>
+          <div class="button-row">
+            <button id="startBtn">Iniciar</button>
+            <button id="stopBtn">Parar</button>
+            <button id="resetBtn" class="ghost">Reset</button>
+            <button id="registerLapBtn" class="accent">Registrar vuelta</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Pista y eventos</h2>
+          <div class="grid">
+            <label>Estado pista<select id="estadoPista"></select></label>
+            <label>Tipo de evento<select id="tipoEvento"></select></label>
+            <label>Clima pista<select id="climaPista"></select></label>
+          </div>
+          <textarea id="timingNotes" rows="4" placeholder="Notas de la vuelta o del evento"></textarea>
+          <div class="button-row compact">
+            <button id="addEventBtn">Anadir evento</button>
+            <button id="pitOutBtn">Pit Out</button>
+            <button id="pitInBtn">Pit In</button>
+            <button id="scOutBtn">Sale SC</button>
+            <button id="scInBtn">Entra SC</button>
+            <button id="weatherBtn">Cambio clima</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Registro</h2>
+          <div id="timingList" class="timing-list"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-setup">
+        <div class="card">
+          <h2>Direccion</h2>
+          <div class="grid">
+            <label>Distancia ruedas delante<input id="distanciaDelante" type="text"></label>
+            <label>Distancia ruedas detras<input id="distanciaDetras" type="text"></label>
+            <label>Caida izquierda<input id="caidaIzq" type="text"></label>
+            <label>Caida derecha<input id="caidaDer" type="text"></label>
+            <label>Caster izquierdo<input id="casterIzq" type="text"></label>
+            <label>Caster derecho<input id="casterDer" type="text"></label>
+            <label>Reactividad<input id="reactividad" type="text"></label>
+            <label>Avance<input id="avance" type="text"></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Eje trasero</h2>
+          <div class="grid">
+            <label>Tipo de neumatico<input id="neumatico" type="text"></label>
+            <label>Tipo de llanta<input id="llanta" type="text"></label>
+            <label>Tipo de buje<input id="buje" type="text"></label>
+            <label>Ancho trasero<input id="anchoTrasero" type="text"></label>
+            <label>Altura de eje<input id="alturaEje" type="text"></label>
+            <label>Pinon<input id="pinon" type="text"></label>
+            <label>Corona<input id="corona" type="text"></label>
+            <label>Relacion<input id="relacion" type="text" readonly></label>
+            <label>Tipo de eje<input id="tipoEje" type="text"></label>
+            <label>Presion del. izq.<input id="presionDelIzq" type="text"></label>
+            <label>Presion del. der.<input id="presionDelDer" type="text"></label>
+            <label>Presion tras. izq.<input id="presionTrasIzq" type="text"></label>
+            <label>Presion tras. der.<input id="presionTrasDer" type="text"></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Motor</h2>
+          <div class="grid">
+            <label>Bujia<input id="bujia" type="text"></label>
+            <label>Carburacion<input id="carburacion" type="text"></label>
+            <label>Desarrollo<input id="desarrollo" type="text"></label>
+            <label>Temperatura motor<input id="temperaturaMotor" type="text"></label>
+            <label>Aguja altas<input id="agujaAltas" type="text"></label>
+            <label>Aguja bajas<input id="agujaBajas" type="text"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-export">
+        <div class="card">
+          <h2>Exportacion</h2>
+          <p>Esta version movil guarda los datos en el navegador y permite exportar un archivo JSON con toda la sesion.</p>
+          <div class="button-row">
+            <button id="exportBtn" class="accent">Descargar sesion</button>
+            <button id="importBtn">Importar sesion</button>
+            <button id="clearBtn" class="ghost">Borrar datos</button>
+          </div>
+          <input id="importFile" type="file" accept=".json,application/json" hidden>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
