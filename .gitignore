@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# tauri
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/.cargo/
+
+# generated PWA service worker (regenerated on build)
+/public/sw.js
+/public/swe-worker-*.js
+
+# local Claude artifacts
+/test-screenshots/
+
+.vercel

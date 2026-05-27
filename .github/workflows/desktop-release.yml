@@ -1,0 +1,100 @@
+name: Desktop release
+
+# Builds Tauri desktop installers for Windows / macOS / Linux on tag push
+# and on manual dispatch. Uploads installers as workflow artifacts.
+#
+# Usage:
+#   git tag desktop-v1.0.0 && git push origin desktop-v1.0.0
+# or trigger manually from the Actions tab.
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: windows
+            artifact-glob: "src-tauri/target/release/bundle/**/*"
+          - platform: macos-latest
+            label: macos
+            artifact-glob: "src-tauri/target/release/bundle/**/*"
+          - platform: ubuntu-22.04
+            label: linux
+            artifact-glob: "src-tauri/target/release/bundle/**/*"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Generate Tauri icons
+        run: node scripts/generate-tauri-icons.mjs
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          # The tauri-action picks up tauri.conf.json automatically.
+          # We don't bundle the Next.js app — the desktop binary wraps
+          # the live PWA at https://vrs-studio-web.vercel.app
+          args: ""
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrs-studio-${{ matrix.label }}
+          path: ${{ matrix.artifact-glob }}
+          if-no-files-found: warn
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          name: VRS Studio Desktop ${{ github.ref_name }}
+          generate_release_notes: true

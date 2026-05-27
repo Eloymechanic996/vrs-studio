@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VRS Studio</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+        color: #f5f5f5;
+        font-family: system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+      }
+      a { color: #dc2626; }
+    </style>
+  </head>
+  <body>
+    <noscript>VRS Studio necesita JavaScript.</noscript>
+    <script>
+      // Fallback in case Tauri didn't preload the remote URL.
+      window.location.replace("https://vrs-studio-web.vercel.app");
+    </script>
+  </body>
+</html>
