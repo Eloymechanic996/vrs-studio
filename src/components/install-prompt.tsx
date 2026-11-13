@@ -108,7 +108,7 @@ export function InstallPrompt() {
       aria-label="Instalar VRS Studio"
       className="fixed inset-x-3 bottom-3 z-50 mx-auto max-w-md sm:left-auto sm:right-4 sm:bottom-4 sm:mx-0"
     >
-      <div className="relative rounded-xl border border-accent/30 bg-surface/95 p-4 shadow-[0_20px_60px_-20px_rgba(220,38,38,0.45)] backdrop-blur">
+      <div className="relative rounded-xl border border-accent/30 bg-surface/95 p-4 shadow-lg backdrop-blur">
         <button
           onClick={dismiss}
           aria-label="Cerrar"
@@ -118,7 +118,7 @@ export function InstallPrompt() {
         </button>
 
         <div className="flex items-start gap-3 pr-6">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-orange-500 text-white">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-2 text-on-accent">
             <Download className="h-5 w-5" />
           </div>
           <div className="flex-1">
@@ -135,7 +135,7 @@ export function InstallPrompt() {
               </p>
             ) : (
               <p className="mt-1 text-xs text-muted">
-                Instalala en tu dispositivo para acceso rapido y uso offline.
+                Instálala en tu dispositivo para acceso rápido y uso sin conexión.
               </p>
             )}
           </div>

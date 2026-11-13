@@ -1,8 +1,4 @@
-import type { Database, EventType, TrackState } from "@/lib/supabase/types";
-
-type Lap = Database["public"]["Tables"]["laps"]["Row"];
-type Event = Database["public"]["Tables"]["events"]["Row"];
-type LapSector = Database["public"]["Tables"]["lap_sectors"]["Row"];
+import type { EventType, Lap, LapEvent, LapSector, TrackState } from "@/lib/supabase/types";
 
 export interface LapStats {
   count: number;
@@ -11,67 +7,75 @@ export interface LapStats {
   bestId: string | null;
   averageMs: number | null;
   stddevMs: number | null;
-  /** Coefficient of variation: stddev / mean. Lower = more consistent. */
+  /** Coeficiente de variación: desviación / media. Menor = más consistente. */
   cv: number | null;
 }
 
-/**
- * "Clean" laps for pace analysis: only Green Flag laps count.
- * Pit in/out, safety car laps, etc. would skew consistency metrics.
- */
-function isCleanLap(lap: Pick<Lap, "track_state">): boolean {
+/** Una vuelta por debajo de este % de la mediana se considera un error de marcado. */
+const MIN_VALID_RATIO = 0.7;
+/** Vueltas más lentas que este % de la mejor no representan el ritmo (salida, tráfico...). */
+const CLEAN_MAX_RATIO = 1.07;
+
+function isGreen(lap: Pick<Lap, "track_state">): boolean {
   return (lap.track_state as TrackState) === "Green Flag";
 }
 
-export function computeLapStats(laps: Lap[]): LapStats {
-  const empty: LapStats = {
-    count: laps.length,
-    cleanCount: 0,
-    bestMs: null,
-    bestId: null,
-    averageMs: null,
-    stddevMs: null,
-    cv: null,
-  };
-  if (laps.length === 0) return empty;
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
-  let best: Lap | null = null;
+function fastest<T extends Pick<Lap, "lap_time_ms">>(laps: T[]): T | null {
+  let best: T | null = null;
   for (const l of laps) {
     if (!best || l.lap_time_ms < best.lap_time_ms) best = l;
   }
+  return best;
+}
 
-  const clean = laps.filter(isCleanLap);
-  if (clean.length === 0) {
-    return {
-      ...empty,
-      bestMs: best?.lap_time_ms ?? null,
-      bestId: best?.id ?? null,
-    };
-  }
+function classify(laps: Lap[]): { clean: Lap[]; best: Lap | null } {
+  const green = laps.filter(isGreen);
+  if (green.length === 0) return { clean: [], best: fastest(laps) };
 
-  const sum = clean.reduce((a, l) => a + l.lap_time_ms, 0);
-  const mean = sum / clean.length;
+  const med = median(green.map((l) => l.lap_time_ms));
+  const valid = green.filter((l) => l.lap_time_ms >= med * MIN_VALID_RATIO);
+  const best = fastest(valid);
+  if (!best) return { clean: [], best: fastest(laps) };
 
-  let varianceSum = 0;
-  for (const l of clean) {
-    const d = l.lap_time_ms - mean;
-    varianceSum += d * d;
-  }
-  // Population stddev (we have the full set, not a sample).
-  const stddev = Math.sqrt(varianceSum / clean.length);
+  const limit = best.lap_time_ms * CLEAN_MAX_RATIO;
+  return { clean: valid.filter((l) => l.lap_time_ms <= limit), best };
+}
 
-  return {
+/** Identificadores de las vueltas que representan el ritmo real. */
+export function cleanLapIds(laps: Lap[]): Set<string> {
+  return new Set(classify(laps).clean.map((l) => l.id));
+}
+
+function meanAndDeviation(times: number[]): { mean: number; stddev: number } {
+  const mean = times.reduce((a, t) => a + t, 0) / times.length;
+  const variance = times.reduce((a, t) => a + (t - mean) ** 2, 0) / times.length;
+  return { mean, stddev: Math.sqrt(variance) };
+}
+
+export function computeLapStats(laps: Lap[]): LapStats {
+  const { clean, best } = classify(laps);
+  const base: LapStats = {
     count: laps.length,
     cleanCount: clean.length,
     bestMs: best?.lap_time_ms ?? null,
     bestId: best?.id ?? null,
-    averageMs: mean,
-    stddevMs: stddev,
-    cv: mean > 0 ? stddev / mean : null,
+    averageMs: null,
+    stddevMs: null,
+    cv: null,
   };
+  if (clean.length === 0) return base;
+
+  const { mean, stddev } = meanAndDeviation(clean.map((l) => l.lap_time_ms));
+  return { ...base, averageMs: mean, stddevMs: stddev, cv: mean > 0 ? stddev / mean : null };
 }
 
-/** Difference from a reference lap, returned as a signed millisecond delta. */
+/** Diferencia con una vuelta de referencia, en milisegundos con signo. */
 export function lapDelta(lapMs: number, referenceMs: number | null): number | null {
   if (referenceMs === null) return null;
   return lapMs - referenceMs;
@@ -87,10 +91,7 @@ export function formatDelta(deltaMs: number | null): string {
   return `${sign}${seconds}.${String(millis).padStart(3, "0")}`;
 }
 
-/**
- * Qualitative consistency label based on coefficient of variation.
- * Karting-tuned thresholds: <1% is metronomic, >3% is erratic.
- */
+/** Etiqueta de consistencia según el coeficiente de variación (umbrales de karting). */
 export function consistencyLabel(cv: number | null): {
   label: string;
   tone: "success" | "info" | "warning" | "danger" | "muted";
@@ -103,11 +104,6 @@ export function consistencyLabel(cv: number | null): {
   return { label: "Irregular", tone: "danger" };
 }
 
-/**
- * Best time per sector index across all laps in the session.
- * Returns an array of length `sectorsCount`; index i = best time for sector i+1,
- * or null if no lap has logged that sector.
- */
 export function bestSectorTimes(
   sectors: LapSector[],
   sectorsCount: number,
@@ -117,20 +113,12 @@ export function bestSectorTimes(
     const idx = s.sector_number - 1;
     if (idx < 0 || idx >= sectorsCount) continue;
     const current = best[idx];
-    if (current === null || s.time_ms < current) {
-      best[idx] = s.time_ms;
-    }
+    if (current === null || s.time_ms < current) best[idx] = s.time_ms;
   }
   return best;
 }
 
-/**
- * Theoretical best lap = sum of best sector times.
- * Returns null if any sector has no recorded times.
- */
-export function theoreticalBestLap(
-  bestSectors: (number | null)[],
-): number | null {
+export function theoreticalBestLap(bestSectors: (number | null)[]): number | null {
   if (bestSectors.length === 0) return null;
   let sum = 0;
   for (const t of bestSectors) {
@@ -141,136 +129,117 @@ export function theoreticalBestLap(
 }
 
 // ---------------------------------------------------------------------------
-// Stint analysis
+// Stints
 // ---------------------------------------------------------------------------
 
 export interface Stint {
   index: number;
   laps: Lap[];
-  startMs: number;
-  endMs: number;
   bestMs: number | null;
   averageMs: number | null;
   stddevMs: number | null;
-  /** Slope of linear fit (lap_time_ms vs in-stint lap number). Positive = degrading. */
+  /** Pendiente de la recta de tiempos en vueltas limpias. Positivo = pierde ritmo. */
   decayMsPerLap: number | null;
-  /** Pit stop duration entering this stint, in ms. null for the first stint. */
+  /** Duración de la parada que abre este stint. null en el primero. */
   pitInMs: number | null;
 }
 
+function pitPairs(events: LapEvent[]): { inMs: number; outMs: number | null }[] {
+  const times = (type: EventType) =>
+    events
+      .filter((e) => e.event_type === type)
+      .map((e) => e.elapsed_ms)
+      .sort((a, b) => a - b);
+  const pitIns = times("Pit In");
+  const pitOuts = times("Pit Out");
+
+  let outIdx = 0;
+  return pitIns.map((inMs) => {
+    while (outIdx < pitOuts.length && pitOuts[outIdx] < inMs) outIdx++;
+    const outMs = pitOuts[outIdx];
+    if (outMs === undefined) return { inMs, outMs: null };
+    outIdx++;
+    return { inMs, outMs };
+  });
+}
+
+function linearSlope(points: { x: number; y: number }[]): number | null {
+  if (points.length < 3) return null;
+  const n = points.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (const { x, y } of points) {
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumXX += x * x;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  return denom === 0 ? null : (n * sumXY - sumX * sumY) / denom;
+}
+
 /**
- * Partition laps into stints, separated by Pit In events.
- * A stint = consecutive laps between (start) → Pit In, or Pit Out → Pit In, etc.
+ * Divide las vueltas en stints separados por paradas. La vuelta que termina
+ * durante la parada pertenece al stint que acaba. Las métricas usan vueltas
+ * limpias y, si un stint no tiene ninguna, todas las suyas.
  */
-export function computeStints(laps: Lap[], events: Event[]): Stint[] {
+export function computeStints(laps: Lap[], events: LapEvent[]): Stint[] {
   if (laps.length === 0) return [];
 
-  const pitIns = events
-    .filter((e) => (e.event_type as EventType) === "Pit In")
-    .map((e) => e.elapsed_ms)
-    .sort((a, b) => a - b);
-  const pitOuts = events
-    .filter((e) => (e.event_type as EventType) === "Pit Out")
-    .map((e) => e.elapsed_ms)
-    .sort((a, b) => a - b);
-
-  // Build stint boundaries on the time axis.
-  // Stint k runs from boundary[k] to boundary[k+1].
-  // boundary[0] = 0, then each Pit In closes a stint, each Pit Out opens one.
-  // If counts don't match, we still partition by Pit In events alone.
-  const boundaries: { start: number; end: number; pitInMs: number | null }[] = [];
+  const ranges: { start: number; end: number; pitInMs: number | null }[] = [];
   let cursor = 0;
-  let outIdx = 0;
-  let lastPitInMs: number | null = null;
-  for (const inMs of pitIns) {
-    boundaries.push({ start: cursor, end: inMs, pitInMs: lastPitInMs });
-    // Find next pit out after this pit in
-    while (outIdx < pitOuts.length && pitOuts[outIdx] < inMs) outIdx++;
-    const matchingOut = pitOuts[outIdx];
-    if (matchingOut !== undefined) {
-      lastPitInMs = matchingOut - inMs;
-      cursor = matchingOut;
-      outIdx++;
-    } else {
-      // Unfinished pit stop; remaining laps (if any) form no further stint.
-      cursor = Number.POSITIVE_INFINITY;
-    }
-  }
-  // Trailing stint after last pit (or the whole session if no pit ins).
-  if (cursor !== Number.POSITIVE_INFINITY) {
-    boundaries.push({
+  let previousPit: number | null = null;
+  let open = true;
+  for (const { inMs, outMs } of pitPairs(events)) {
+    if (!open) break;
+    ranges.push({
       start: cursor,
-      end: Number.POSITIVE_INFINITY,
-      pitInMs: lastPitInMs,
+      end: outMs ?? Number.POSITIVE_INFINITY,
+      pitInMs: previousPit,
     });
+    if (outMs === null) {
+      open = false;
+    } else {
+      previousPit = outMs - inMs;
+      cursor = outMs;
+    }
+  }
+  if (open) {
+    ranges.push({ start: cursor, end: Number.POSITIVE_INFINITY, pitInMs: previousPit });
   }
 
+  const clean = cleanLapIds(laps);
   const stints: Stint[] = [];
-  boundaries.forEach((b, i) => {
+  for (const range of ranges) {
     const stintLaps = laps.filter(
-      (l) => l.total_time_ms > b.start && l.total_time_ms <= b.end,
+      (l) => l.total_time_ms > range.start && l.total_time_ms <= range.end,
     );
-    if (stintLaps.length === 0) return;
+    if (stintLaps.length === 0) continue;
 
-    const times = stintLaps.map((l) => l.lap_time_ms);
-    const best = Math.min(...times);
-    const mean = times.reduce((a, t) => a + t, 0) / times.length;
-    let varSum = 0;
-    for (const t of times) varSum += (t - mean) ** 2;
-    const stddev = Math.sqrt(varSum / times.length);
-
-    let decay: number | null = null;
-    if (stintLaps.length >= 3) {
-      // Simple linear regression: y = a + b*x, x = in-stint index (0-based)
-      const n = stintLaps.length;
-      let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-      stintLaps.forEach((l, idx) => {
-        sumX += idx;
-        sumY += l.lap_time_ms;
-        sumXY += idx * l.lap_time_ms;
-        sumXX += idx * idx;
-      });
-      const denom = n * sumXX - sumX * sumX;
-      if (denom !== 0) decay = (n * sumXY - sumX * sumY) / denom;
-    }
+    const cleanInStint = stintLaps.filter((l) => clean.has(l.id));
+    const reference = cleanInStint.length > 0 ? cleanInStint : stintLaps;
+    const times = reference.map((l) => l.lap_time_ms);
+    const { mean, stddev } = meanAndDeviation(times);
+    const decay = linearSlope(
+      stintLaps.flatMap((l, x) => (clean.has(l.id) ? [{ x, y: l.lap_time_ms }] : [])),
+    );
 
     stints.push({
-      index: i + 1,
+      index: stints.length + 1,
       laps: stintLaps,
-      startMs: b.start,
-      endMs: b.end === Number.POSITIVE_INFINITY
-        ? (stintLaps[stintLaps.length - 1]?.total_time_ms ?? b.start)
-        : b.end,
-      bestMs: best,
+      bestMs: Math.min(...times),
       averageMs: mean,
       stddevMs: stddev,
       decayMsPerLap: decay,
-      pitInMs: b.pitInMs,
+      pitInMs: range.pitInMs,
     });
-  });
-
+  }
   return stints;
 }
 
-/** Sum of all pit-stop durations (matched Pit In/Pit Out pairs). */
-export function totalPitTimeMs(events: Event[]): number {
-  const pitIns = events
-    .filter((e) => (e.event_type as EventType) === "Pit In")
-    .map((e) => e.elapsed_ms)
-    .sort((a, b) => a - b);
-  const pitOuts = events
-    .filter((e) => (e.event_type as EventType) === "Pit Out")
-    .map((e) => e.elapsed_ms)
-    .sort((a, b) => a - b);
-  let total = 0;
-  let outIdx = 0;
-  for (const inMs of pitIns) {
-    while (outIdx < pitOuts.length && pitOuts[outIdx] < inMs) outIdx++;
-    const out = pitOuts[outIdx];
-    if (out !== undefined) {
-      total += out - inMs;
-      outIdx++;
-    }
-  }
-  return total;
+/** Suma de las paradas completas (Pit In seguido de Pit Out). */
+export function totalPitTimeMs(events: LapEvent[]): number {
+  return pitPairs(events).reduce(
+    (total, { inMs, outMs }) => (outMs === null ? total : total + outMs - inMs),
+    0,
+  );
 }

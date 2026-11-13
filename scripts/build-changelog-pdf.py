@@ -1,4 +1,5 @@
 """Generate VRS-Studio-Cambios.pdf — handoff document for the original author."""
+import os
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
@@ -17,7 +18,7 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.doctemplate import NextPageTemplate
 
-OUTPUT = r"c:\Users\Juan Miguel\VRC\vrs-studio-web\VRS-Studio-Cambios.pdf"
+OUTPUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "VRS-Studio-Cambios.pdf")
 
 # ---------------------------------------------------------------------------
 # Palette
@@ -204,7 +205,7 @@ def draw_body_bg(canvas, doc):
     canvas.setStrokeColor(RULE); canvas.setLineWidth(0.4)
     canvas.line(MARGIN, 1.4 * cm, PAGE_W - MARGIN, 1.4 * cm)
     canvas.setFillColor(MUTED); canvas.setFont("Helvetica", 8)
-    canvas.drawString(MARGIN, 1.0 * cm, "https://vrs-studio-web.vercel.app")
+    canvas.drawString(MARGIN, 1.0 * cm, "https://vrs-studio.vercel.app")
     canvas.drawRightString(PAGE_W - MARGIN, 1.0 * cm, f"Pagina {doc.page}")
     canvas.restoreState()
 
@@ -249,7 +250,7 @@ story.append(Paragraph(
 story.append(Spacer(1, 5.6 * cm))
 story.append(Paragraph(
     "<b>URL en produccion</b><br/>"
-    "<font color='#DC2626'>https://vrs-studio-web.vercel.app</font>",
+    "<font color='#DC2626'>https://vrs-studio.vercel.app</font>",
     style_cover_meta,
 ))
 story.append(Spacer(1, 0.4 * cm))
@@ -500,7 +501,7 @@ story.append(Paragraph("Como se usa (flujo completo)", style_h2))
 story.append(section_rule())
 steps = [
     ("1. Entrar y crear cuenta",
-     "Abre <b>https://vrs-studio-web.vercel.app</b>. Crea cuenta con email y "
+     "Abre <b>https://vrs-studio.vercel.app</b>. Crea cuenta con email y "
      "contrasena. Confirma el email si Supabase asi lo requiere."),
     ("2. Instalar como app (opcional)",
      "Aparece banner en Android/Chrome/Edge para instalar con un click. En "

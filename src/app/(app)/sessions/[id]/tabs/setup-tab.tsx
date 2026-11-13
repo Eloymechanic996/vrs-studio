@@ -1,151 +1,177 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { Save } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { format } from "date-fns";
+import { Copy, Save } from "lucide-react";
+import { loadSetupFrom, saveSetup } from "@/app/(app)/actions";
+import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, Input, Textarea } from "@/components/ui/input";
-import { saveSetup } from "@/app/(app)/actions";
-import type { Database } from "@/lib/supabase/types";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import {
+  computeRatio,
+  CROWN_FIELD,
+  PINION_FIELD,
+  RATIO_FIELD,
+  setupGroupsFor,
+  type SetupGroupKey,
+} from "@/lib/setup-fields";
+import type { Session, Setup } from "@/lib/supabase/types";
+import { parseDateOnly } from "@/lib/utils";
 
-type Session = Database["public"]["Tables"]["sessions"]["Row"];
-type Setup = Database["public"]["Tables"]["setups"]["Row"];
+type Values = Record<SetupGroupKey, Record<string, string>>;
 
-const STEERING_FIELDS = [
-  "Convergencia",
-  "Caster",
-  "Camber delantero",
-  "Ancho via delantero",
-  "Diferencia barra direccion",
-  "Altura suspension",
-];
-const REAR_FIELDS = [
-  "Tipo de eje",
-  "Diametro eje",
-  "Longitud eje",
-  "Ancho via trasero",
-  "Altura trasera",
-  "Buje",
-  "Llantas",
-  "Neumaticos",
-  "Presion delantera",
-  "Presion trasera",
-];
-const ENGINE_FIELDS = [
-  "Motor",
-  "Carburador",
-  "Encendido",
-  "Escape",
-  "Pinon",
-  "Corona",
-  "Ratio",
-  "Cadena",
-  "Mezcla",
-  "Bujia",
-];
+const AUTOSAVE_MS = 1500;
 
 export function SetupTab({
   session,
   setup,
+  copyCandidates,
 }: {
   session: Session;
   setup: Setup | null;
+  copyCandidates: { id: string; name: string; date: string }[];
 }) {
-  const initial = {
+  const toast = useToast();
+  const groups = useMemo(() => setupGroupsFor(session.modality), [session.modality]);
+  const [values, setValues] = useState<Values>({
     steering: (setup?.steering as Record<string, string>) ?? {},
     rear_axle: (setup?.rear_axle as Record<string, string>) ?? {},
     engine: (setup?.engine as Record<string, string>) ?? {},
-  };
-  const [steering, setSteering] = useState(initial.steering);
-  const [rear, setRear] = useState(initial.rear_axle);
-  const [engine, setEngine] = useState(initial.engine);
-  const [notes, setNotes] = useState((initial.engine.notes as string) ?? "");
-  const [pending, startTransition] = useTransition();
+  });
+  const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [copyFrom, setCopyFrom] = useState("");
+  const [pending, startTransition] = useTransition();
+  const valuesRef = useRef(values);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function persist() {
+  async function persist(): Promise<boolean> {
+    if (timer.current) clearTimeout(timer.current);
+    try {
+      const result = await saveSetup({ session_id: session.id, ...valuesRef.current });
+      if (!result.ok) {
+        toast({ message: result.error, tone: "error" });
+        return false;
+      }
+      setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString("es-ES"));
+      return true;
+    } catch {
+      toast({ message: "Sin conexión: el setup se guardará al pulsar Guardar con cobertura.", tone: "error" });
+      return false;
+    }
+  }
+
+  const persistRef = useRef(persist);
+  useEffect(() => {
+    persistRef.current = persist;
+  });
+
+  function schedule(next: Values) {
+    valuesRef.current = next;
+    setValues(next);
+    setDirty(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void persistRef.current(), AUTOSAVE_MS);
+  }
+
+  function change(group: SetupGroupKey, field: string, value: string) {
+    const groupValues = { ...valuesRef.current[group], [field]: value };
+    if (field === PINION_FIELD || field === CROWN_FIELD) {
+      groupValues[RATIO_FIELD] = computeRatio(groupValues[PINION_FIELD], groupValues[CROWN_FIELD]);
+    }
+    schedule({ ...valuesRef.current, [group]: groupValues });
+  }
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  function copySetup() {
+    if (!copyFrom) return;
+    if (!confirm("Se sustituirá el setup actual por el de la sesión elegida. ¿Continuar?")) return;
     startTransition(async () => {
-      await saveSetup({
-        session_id: session.id,
-        steering,
-        rear_axle: rear,
-        engine: { ...engine, notes },
-      });
-      setSavedAt(new Date().toLocaleTimeString());
+      try {
+        const result = await loadSetupFrom(copyFrom);
+        if (!result.ok) {
+          toast({ message: result.error, tone: "error" });
+          return;
+        }
+        schedule({ steering: result.steering, rear_axle: result.rear_axle, engine: result.engine });
+        toast({ message: "Setup copiado.", tone: "success" });
+      } catch {
+        toast({ message: "Sin conexión: no se pudo copiar el setup.", tone: "error" });
+      }
     });
   }
 
+  const engineNotes = values.engine.notes ?? "";
+
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      <SetupGroup
-        title="Direccion"
-        fields={STEERING_FIELDS}
-        values={steering}
-        onChange={setSteering}
-      />
-      <SetupGroup
-        title="Eje trasero / Tren"
-        fields={REAR_FIELDS}
-        values={rear}
-        onChange={setRear}
-      />
-      <SetupGroup
-        title="Motor"
-        fields={ENGINE_FIELDS}
-        values={engine}
-        onChange={setEngine}
-      >
-        <Field label="Notas del motor" className="mt-2">
-          <Textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={3}
-          />
-        </Field>
-      </SetupGroup>
+      {copyCandidates.length > 0 ? (
+        <Card className="lg:col-span-3">
+          <CardContent className="flex flex-wrap items-end gap-3">
+            <Field label="Copiar setup de otra sesión" className="min-w-52 flex-1">
+              <Select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)}>
+                <option value="">— elige —</option>
+                {copyCandidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {format(parseDateOnly(c.date), "dd/MM/yyyy")} — {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button variant="secondary" onClick={copySetup} disabled={!copyFrom || pending}>
+              <Copy className="h-4 w-4" />
+              Copiar
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <div className="lg:col-span-3 flex items-center justify-end gap-3">
-        {savedAt ? (
-          <p className="text-xs text-muted">Guardado a las {savedAt}</p>
-        ) : null}
-        <Button onClick={persist} disabled={pending} size="lg">
+      {groups.map((group) => (
+        <Card key={group.key}>
+          <CardHeader>
+            <CardTitle>{group.title}</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {group.fields.map((field) => (
+              <Field key={field} label={field}>
+                <Input
+                  value={values[group.key][field] ?? ""}
+                  readOnly={field === RATIO_FIELD}
+                  placeholder={field === RATIO_FIELD ? "Automática" : undefined}
+                  onChange={(e) => change(group.key, field, e.target.value)}
+                />
+              </Field>
+            ))}
+            {group.key === "engine" ? (
+              <Field label="Notas" className="mt-2">
+                <Textarea
+                  value={engineNotes}
+                  onChange={(e) => change("engine", "notes", e.target.value)}
+                  rows={3}
+                />
+              </Field>
+            ) : null}
+          </CardContent>
+        </Card>
+      ))}
+
+      <div className="flex items-center justify-end gap-3 lg:col-span-3">
+        <p className="text-xs text-muted">
+          {dirty ? "Cambios sin guardar..." : savedAt ? `Guardado a las ${savedAt}` : "Se guarda automáticamente"}
+        </p>
+        <Button onClick={() => void persist()} size="lg" disabled={!dirty}>
           <Save className="h-4 w-4" />
-          {pending ? "Guardando..." : "Guardar setup"}
+          Guardar setup
         </Button>
       </div>
     </div>
-  );
-}
-
-function SetupGroup({
-  title,
-  fields,
-  values,
-  onChange,
-  children,
-}: {
-  title: string;
-  fields: string[];
-  values: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
-  children?: React.ReactNode;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        {fields.map((f) => (
-          <Field key={f} label={f}>
-            <Input
-              value={values[f] ?? ""}
-              onChange={(e) => onChange({ ...values, [f]: e.target.value })}
-            />
-          </Field>
-        ))}
-        {children}
-      </CardContent>
-    </Card>
   );
 }

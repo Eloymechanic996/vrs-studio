@@ -52,4 +52,10 @@ next-env.d.ts
 # local Claude artifacts
 /test-screenshots/
 
+# carpeta interna de gestion (diario, progreso, ideas): no se sube a GitHub
+/admin/
+
 .vercel
+
+# supabase cli
+/supabase/.temp/

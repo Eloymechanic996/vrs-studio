@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { cleanLapIds } from "@/lib/stats";
+import type { Lap } from "@/lib/supabase/types";
 import { formatLapTime } from "@/lib/utils";
-import type { Database } from "@/lib/supabase/types";
-
-type Lap = Database["public"]["Tables"]["laps"]["Row"];
 
 interface Series {
   label: string;
@@ -12,250 +11,190 @@ interface Series {
   laps: Lap[];
 }
 
-export function LapChart({
-  laps,
-  height = 220,
-  className,
-}: {
-  laps: Lap[];
-  height?: number;
-  className?: string;
-}) {
+const PADDING = { top: 16, right: 16, bottom: 28, left: 64 };
+const AXIS_COLOR = "var(--muted)";
+const GRID_COLOR = "var(--border)";
+
+export function LapChart({ laps, height = 220 }: { laps: Lap[]; height?: number }) {
   return (
     <MultiLapChart
-      series={[{ label: "Tiempos", color: "#DC2626", laps }]}
+      series={[{ label: "Tiempos", color: "var(--accent)", laps }]}
       height={height}
-      className={className}
     />
   );
 }
 
-export function MultiLapChart({
-  series,
-  height = 240,
-  className,
-}: {
-  series: Series[];
-  height?: number;
-  className?: string;
-}) {
-  const [hover, setHover] = useState<{
-    seriesIdx: number;
-    lapIdx: number;
-    x: number;
-    y: number;
-  } | null>(null);
+export function MultiLapChart({ series, height = 240 }: { series: Series[]; height?: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(720);
+  const [hover, setHover] = useState<{ series: number; point: number } | null>(null);
 
-  const { width, padding, scaledSeries, yTicks, xMin, xMax, yMin, yMax } =
-    useMemo(() => {
-      const w = 720;
-      const h = height;
-      const pad = { top: 16, right: 16, bottom: 28, left: 56 };
-      const allTimes = series.flatMap((s) => s.laps.map((l) => l.lap_time_ms));
-      const allNums = series.flatMap((s) => s.laps.map((l) => l.lap_number));
-      const yMin0 = Math.min(...allTimes);
-      const yMax0 = Math.max(...allTimes);
-      const yRange = Math.max(1, yMax0 - yMin0);
-      const yPadAmount = yRange * 0.1;
-      const yMin = yMin0 - yPadAmount;
-      const yMax = yMax0 + yPadAmount;
-      const xMin = Math.min(...allNums);
-      const xMax = Math.max(...allNums);
-      const innerW = w - pad.left - pad.right;
-      const innerH = h - pad.top - pad.bottom;
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setWidth(Math.round(entry.contentRect.width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
-      function sx(n: number) {
-        if (xMax === xMin) return pad.left + innerW / 2;
-        return pad.left + ((n - xMin) / (xMax - xMin)) * innerW;
-      }
-      function sy(ms: number) {
-        return pad.top + (1 - (ms - yMin) / (yMax - yMin)) * innerH;
-      }
+  const chart = useMemo(() => {
+    const allLaps = series.flatMap((s) => s.laps);
+    if (allLaps.length === 0) return null;
 
-      const scaled = series.map((s) => ({
+    // La escala se ajusta a las vueltas limpias; el resto se dibuja arriba, marcado.
+    const cleanTimes = series.flatMap((s) => {
+      const clean = cleanLapIds(s.laps);
+      return s.laps.filter((l) => clean.has(l.id)).map((l) => l.lap_time_ms);
+    });
+    const scaleTimes = cleanTimes.length >= 2 ? cleanTimes : allLaps.map((l) => l.lap_time_ms);
+    const low = Math.min(...scaleTimes);
+    const high = Math.max(...scaleTimes);
+    const margin = Math.max(50, (high - low) * 0.12);
+    const yMin = low - margin;
+    const yMax = high + margin;
+
+    const numbers = allLaps.map((l) => l.lap_number);
+    const xMin = Math.min(...numbers);
+    const xMax = Math.max(...numbers);
+    const innerW = Math.max(40, width - PADDING.left - PADDING.right);
+    const innerH = height - PADDING.top - PADDING.bottom;
+
+    const sx = (n: number) =>
+      xMax === xMin ? PADDING.left + innerW / 2 : PADDING.left + ((n - xMin) / (xMax - xMin)) * innerW;
+    const sy = (ms: number) => PADDING.top + (1 - (ms - yMin) / (yMax - yMin)) * innerH;
+
+    return {
+      xMin,
+      xMax,
+      sx,
+      yTicks: generateTicks(yMin, yMax, 4).map((value) => ({ value, y: sy(value) })),
+      lines: series.map((s) => ({
         ...s,
-        points: s.laps.map((l) => ({
-          x: sx(l.lap_number),
-          y: sy(l.lap_time_ms),
-          lap: l,
+        points: s.laps.map((lap) => ({
+          lap,
+          x: sx(lap.lap_number),
+          y: Math.max(PADDING.top, Math.min(height - PADDING.bottom, sy(lap.lap_time_ms))),
+          offScale: lap.lap_time_ms > yMax || lap.lap_time_ms < yMin,
         })),
-      }));
+      })),
+    };
+  }, [series, width, height]);
 
-      const yTicks = generateTicks(yMin, yMax, 4);
-
-      return {
-        width: w,
-        padding: pad,
-        scaledSeries: scaled,
-        yTicks: yTicks.map((t) => ({ value: t, y: sy(t) })),
-        xMin,
-        xMax,
-        yMin,
-        yMax,
-      };
-    }, [series, height]);
-
-  if (series.every((s) => s.laps.length < 2)) {
-    return (
-      <p className="text-xs text-muted">
-        Necesitan al menos 2 vueltas para mostrar la grafica.
-      </p>
-    );
+  if (!chart || series.every((s) => s.laps.length < 2)) {
+    return <p className="text-xs text-muted">Se necesitan al menos 2 vueltas para mostrar la gráfica.</p>;
   }
 
+  function onPointer(e: React.PointerEvent<SVGSVGElement>) {
+    if (!chart) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    let best: { series: number; point: number; d: number } | null = null;
+    chart.lines.forEach((line, si) =>
+      line.points.forEach((p, pi) => {
+        const d = Math.abs(p.x - px) * 3 + Math.abs(p.y - py);
+        if (!best || d < best.d) best = { series: si, point: pi, d };
+      }),
+    );
+    if (best) setHover({ series: (best as { series: number }).series, point: (best as { point: number }).point });
+  }
+
+  const active = hover ? chart.lines[hover.series]?.points[hover.point] : null;
+  const tooltipLaps = active
+    ? chart.lines.flatMap((line) => {
+        const lap = line.laps.find((l) => l.lap_number === active.lap.lap_number);
+        return lap ? [{ label: line.label, color: line.color, lap }] : [];
+      })
+    : [];
+
   return (
-    <div className={className}>
+    <div ref={containerRef}>
       <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full"
-        preserveAspectRatio="none"
-        style={{ maxHeight: height }}
-        onMouseLeave={() => setHover(null)}
+        width={width}
+        height={height}
+        role="img"
+        aria-label="Evolución de tiempos por vuelta"
+        className="block touch-pan-y"
+        onPointerDown={onPointer}
+        onPointerMove={onPointer}
+        onPointerLeave={() => setHover(null)}
       >
-        {/* Grid */}
-        {yTicks.map((t, i) => (
+        {chart.yTicks.map((t, i) => (
           <g key={i}>
-            <line
-              x1={padding.left}
-              x2={width - padding.right}
-              y1={t.y}
-              y2={t.y}
-              stroke="#262626"
-              strokeWidth={0.6}
-            />
-            <text
-              x={padding.left - 6}
-              y={t.y + 3}
-              textAnchor="end"
-              fontSize={10}
-              fill="#71717A"
-              fontFamily="ui-monospace, monospace"
-            >
+            <line x1={PADDING.left} x2={width - PADDING.right} y1={t.y} y2={t.y} stroke={GRID_COLOR} strokeWidth={0.6} />
+            <text x={PADDING.left - 6} y={t.y + 3} textAnchor="end" fontSize={10} fill={AXIS_COLOR} fontFamily="ui-monospace, monospace">
               {formatLapTime(t.value)}
             </text>
           </g>
         ))}
-        {/* X axis numbers */}
-        {generateLapTicks(xMin, xMax).map((n, i) => {
-          const x =
-            xMax === xMin
-              ? padding.left + (width - padding.left - padding.right) / 2
-              : padding.left +
-                ((n - xMin) / (xMax - xMin)) *
-                  (width - padding.left - padding.right);
-          return (
-            <text
-              key={i}
-              x={x}
-              y={height - 8}
-              textAnchor="middle"
-              fontSize={10}
-              fill="#71717A"
-              fontFamily="ui-monospace, monospace"
-            >
-              {n}
-            </text>
-          );
-        })}
+        {generateLapTicks(chart.xMin, chart.xMax).map((n) => (
+          <text key={n} x={chart.sx(n)} y={height - 8} textAnchor="middle" fontSize={10} fill={AXIS_COLOR} fontFamily="ui-monospace, monospace">
+            {n}
+          </text>
+        ))}
 
-        {/* Series */}
-        {scaledSeries.map((s, si) => (
+        {chart.lines.map((line, si) => (
           <g key={si}>
             <polyline
               fill="none"
-              stroke={s.color}
+              stroke={line.color}
               strokeWidth={1.8}
               strokeLinejoin="round"
-              points={s.points.map((p) => `${p.x},${p.y}`).join(" ")}
+              points={line.points.map((p) => `${p.x},${p.y}`).join(" ")}
             />
-            {s.points.map((p, pi) => (
+            {line.points.map((p, pi) => (
               <circle
-                key={pi}
+                key={p.lap.id}
                 cx={p.x}
                 cy={p.y}
-                r={hover?.seriesIdx === si && hover?.lapIdx === pi ? 5 : 3}
-                fill={s.color}
-                stroke="#0a0a0a"
-                strokeWidth={1}
-                onMouseEnter={() =>
-                  setHover({ seriesIdx: si, lapIdx: pi, x: p.x, y: p.y })
-                }
-                style={{ cursor: "pointer" }}
+                r={hover?.series === si && hover.point === pi ? 5 : 3}
+                fill={p.offScale ? "var(--surface)" : line.color}
+                stroke={p.offScale ? line.color : "var(--bg)"}
+                strokeWidth={p.offScale ? 1.5 : 1}
               />
             ))}
           </g>
         ))}
 
-        {/* Tooltip */}
-        {hover ? (
-          <g pointerEvents="none">
-            <line
-              x1={hover.x}
-              x2={hover.x}
-              y1={padding.top}
-              y2={height - padding.bottom}
-              stroke="#404040"
-              strokeWidth={0.6}
-              strokeDasharray="2 3"
-            />
-            <g
-              transform={`translate(${Math.min(width - 140, Math.max(0, hover.x + 8))}, ${Math.max(8, hover.y - 36)})`}
-            >
-              <rect
-                width={132}
-                height={
-                  scaledSeries.filter((s) => s.laps[hover.lapIdx]).length * 14 +
-                  20
-                }
-                rx={4}
-                fill="#0f0f0f"
-                stroke="#262626"
-              />
-              <text
-                x={8}
-                y={14}
-                fontSize={10}
-                fontWeight={600}
-                fill="#f5f5f5"
-              >
-                Vuelta{" "}
-                {scaledSeries[hover.seriesIdx].laps[hover.lapIdx]?.lap_number}
-              </text>
-              {scaledSeries.map((s, si) => {
-                const lap = s.laps[hover.lapIdx];
-                if (!lap) return null;
-                return (
-                  <g key={si} transform={`translate(8, ${28 + si * 14})`}>
-                    <rect width={8} height={8} y={-7} fill={s.color} rx={1} />
-                    <text
-                      x={14}
-                      fontSize={10}
-                      fill="#d4d4d8"
-                      fontFamily="ui-monospace, monospace"
-                    >
-                      {s.label}: {formatLapTime(lap.lap_time_ms)}
-                    </text>
-                  </g>
-                );
-              })}
-            </g>
-          </g>
+        {active ? (
+          <line
+            pointerEvents="none"
+            x1={active.x}
+            x2={active.x}
+            y1={PADDING.top}
+            y2={height - PADDING.bottom}
+            stroke={AXIS_COLOR}
+            strokeWidth={0.6}
+            strokeDasharray="2 3"
+          />
         ) : null}
       </svg>
 
-      {series.length > 1 ? (
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-          {series.map((s, i) => (
-            <span key={i} className="flex items-center gap-1.5">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded"
-                style={{ background: s.color }}
-              />
+      <div className="mt-2 flex min-h-5 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {active ? (
+          <>
+            <span className="font-semibold text-foreground">Vuelta {active.lap.lap_number}</span>
+            {tooltipLaps.map((t) => (
+              <span key={t.label} className="flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: t.color }} />
+                {series.length > 1 ? <span className="text-muted">{t.label}:</span> : null}
+                <span className="tabular text-foreground">{formatLapTime(t.lap.lap_time_ms)}</span>
+              </span>
+            ))}
+          </>
+        ) : series.length > 1 ? (
+          series.map((s) => (
+            <span key={s.label} className="flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: s.color }} />
               <span className="text-muted">{s.label}</span>
             </span>
-          ))}
-        </div>
-      ) : null}
+          ))
+        ) : (
+          <span className="text-muted">Los puntos huecos quedan fuera de escala (boxes, banderas).</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -269,12 +208,8 @@ function generateTicks(min: number, max: number, count: number): number[] {
 function generateLapTicks(min: number, max: number): number[] {
   const range = max - min;
   if (range <= 0) return [min];
-  const step =
-    range <= 10 ? 1 : range <= 25 ? 2 : range <= 50 ? 5 : 10;
+  const step = range <= 10 ? 1 : range <= 25 ? 2 : range <= 50 ? 5 : 10;
   const ticks: number[] = [];
-  for (let n = Math.ceil(min / step) * step; n <= max; n += step) {
-    ticks.push(n);
-  }
-  if (ticks.length === 0) ticks.push(Math.round((min + max) / 2));
-  return ticks;
+  for (let n = Math.ceil(min / step) * step; n <= max; n += step) ticks.push(n);
+  return ticks.length > 0 ? ticks : [Math.round((min + max) / 2)];
 }

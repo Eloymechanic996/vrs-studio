@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
+import { SESSION_TYPE_LABELS } from "@/lib/labels";
+import { ExportButtons } from "./export-buttons";
 import { SessionWorkspace } from "./session-workspace";
 import { ShareToggle } from "./share-toggle";
 
@@ -23,8 +25,8 @@ export default async function SessionPage({
     .maybeSingle();
   if (!session) notFound();
 
-  const [{ data: laps }, { data: events }, { data: setup }] = await Promise.all(
-    [
+  const [{ data: laps }, { data: events }, { data: setup }, { data: copyCandidates }] =
+    await Promise.all([
       supabase
         .from("laps")
         .select("*")
@@ -36,18 +38,21 @@ export default async function SessionPage({
         .eq("session_id", id)
         .order("created_at", { ascending: true }),
       supabase.from("setups").select("*").eq("session_id", id).maybeSingle(),
-    ],
-  );
+      supabase
+        .from("sessions")
+        .select("id, name, date")
+        .eq("modality", session.modality)
+        .neq("id", id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(30),
+    ]);
 
-  // Fetch sectors for these laps in one query.
   const lapIds = (laps ?? []).map((l) => l.id);
   const { data: sectors } =
     lapIds.length > 0
-      ? await supabase
-          .from("lap_sectors")
-          .select("*")
-          .in("lap_id", lapIds)
-      : { data: [] as never[] };
+      ? await supabase.from("lap_sectors").select("*").in("lap_id", lapIds)
+      : { data: [] };
 
   return (
     <div className="flex flex-col gap-4">
@@ -61,36 +66,21 @@ export default async function SessionPage({
             </Button>
           </Link>
           <div>
-            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-              {session.name}
-            </h1>
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{session.name}</h1>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              <Badge variant="accent">{session.session_type}</Badge>
+              <Badge variant="accent">{SESSION_TYPE_LABELS[session.session_type]}</Badge>
               <Badge variant="muted">{session.modality}</Badge>
-              {session.circuit ? (
-                <Badge variant="info">{session.circuit}</Badge>
-              ) : null}
-              {session.driver ? (
-                <Badge variant="default">{session.driver}</Badge>
-              ) : null}
+              {session.circuit ? <Badge variant="info">{session.circuit}</Badge> : null}
+              {session.driver ? <Badge variant="default">{session.driver}</Badge> : null}
               {session.sectors_count > 0 ? (
                 <Badge variant="muted">{session.sectors_count} sectores</Badge>
               ) : null}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <ShareToggle
-            sessionId={session.id}
-            isPublic={session.is_public}
-            slug={session.public_slug}
-          />
-          <a href={`/api/sessions/${session.id}/export`}>
-            <Button variant="secondary">
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Exportar Excel</span>
-            </Button>
-          </a>
+        <div className="flex max-w-full flex-wrap items-center gap-2">
+          <ShareToggle sessionId={session.id} isPublic={session.is_public} slug={session.public_slug} />
+          <ExportButtons sessionId={session.id} />
         </div>
       </div>
 
@@ -100,6 +90,7 @@ export default async function SessionPage({
         events={events ?? []}
         setup={setup ?? null}
         sectors={sectors ?? []}
+        copyCandidates={copyCandidates ?? []}
       />
     </div>
   );

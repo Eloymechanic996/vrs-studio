@@ -1,29 +1,14 @@
 "use client";
 
 import { Layers } from "lucide-react";
+import { StatCell } from "@/components/stat-cell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  computeStints,
-  consistencyLabel,
-  totalPitTimeMs,
-  type Stint,
-} from "@/lib/stats";
+import { computeStints, consistencyLabel, totalPitTimeMs, type Stint } from "@/lib/stats";
+import type { Lap, LapEvent } from "@/lib/supabase/types";
 import { formatLapTime } from "@/lib/utils";
-import type { Database } from "@/lib/supabase/types";
 
-type Session = Database["public"]["Tables"]["sessions"]["Row"];
-type Lap = Database["public"]["Tables"]["laps"]["Row"];
-type Event = Database["public"]["Tables"]["events"]["Row"];
-
-export function StintsTab({
-  laps,
-  events,
-}: {
-  session: Session;
-  laps: Lap[];
-  events: Event[];
-}) {
+export function StintsTab({ laps, events }: { laps: Lap[]; events: LapEvent[] }) {
   const stints = computeStints(laps, events);
   const totalPit = totalPitTimeMs(events);
 
@@ -37,6 +22,8 @@ export function StintsTab({
     );
   }
 
+  const fastest = stints.reduce((a, b) => ((a.bestMs ?? Infinity) <= (b.bestMs ?? Infinity) ? a : b));
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
@@ -46,27 +33,21 @@ export function StintsTab({
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 pt-0 sm:grid-cols-4">
-          <Cell label="Stints" value={String(stints.length)} />
-          <Cell
-            label="Tiempo en pits"
-            value={
-              totalPit > 0 ? formatLapTime(totalPit) : "—"
-            }
+          <StatCell label="Stints" value={String(stints.length)} size="base" />
+          <StatCell
+            label="Tiempo en boxes"
+            value={totalPit > 0 ? formatLapTime(totalPit) : "—"}
+            size="base"
           />
-          <Cell
+          <StatCell
             label="Vueltas totales"
             value={String(stints.reduce((a, s) => a + s.laps.length, 0))}
+            size="base"
           />
-          <Cell
+          <StatCell
             label="Mejor stint"
-            value={(() => {
-              const withBest = stints.filter((s) => s.bestMs !== null);
-              if (withBest.length === 0) return "—";
-              const best = withBest.reduce(
-                (a, b) => ((a.bestMs ?? Infinity) < (b.bestMs ?? Infinity) ? a : b),
-              );
-              return `#${best.index} · ${formatLapTime(best.bestMs!)}`;
-            })()}
+            value={fastest.bestMs !== null ? `#${fastest.index} · ${formatLapTime(fastest.bestMs)}` : "—"}
+            size="base"
           />
         </CardContent>
       </Card>
@@ -81,9 +62,11 @@ export function StintsTab({
 }
 
 function StintCard({ stint }: { stint: Stint }) {
-  const cons = consistencyLabel(
-    stint.averageMs && stint.stddevMs ? stint.stddevMs / stint.averageMs : null,
-  );
+  const cv =
+    stint.averageMs !== null && stint.stddevMs !== null && stint.averageMs > 0
+      ? stint.stddevMs / stint.averageMs
+      : null;
+  const cons = consistencyLabel(cv);
   return (
     <Card>
       <CardHeader>
@@ -93,41 +76,34 @@ function StintCard({ stint }: { stint: Stint }) {
             Stint #{stint.index}
           </CardTitle>
           {stint.pitInMs !== null ? (
-            <Badge variant="muted">
-              Pit anterior: {formatLapTime(stint.pitInMs)}
-            </Badge>
+            <Badge variant="muted">Parada previa: {formatLapTime(stint.pitInMs)}</Badge>
           ) : (
             <Badge variant="info">Inicial</Badge>
           )}
         </div>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3 text-sm">
-        <Cell label="Vueltas" value={String(stint.laps.length)} />
-        <Cell
+        <StatCell label="Vueltas" value={String(stint.laps.length)} size="base" />
+        <StatCell
           label="Mejor"
           value={stint.bestMs !== null ? formatLapTime(stint.bestMs) : "—"}
           accent
+          size="base"
         />
-        <Cell
+        <StatCell
           label="Media"
-          value={
-            stint.averageMs !== null ? formatLapTime(stint.averageMs) : "—"
-          }
+          value={stint.averageMs !== null ? formatLapTime(stint.averageMs) : "—"}
+          size="base"
         />
-        <Cell
-          label="Desv. tipica"
-          value={
-            stint.stddevMs !== null
-              ? `±${(stint.stddevMs / 1000).toFixed(3)} s`
-              : "—"
-          }
+        <StatCell
+          label="Desv. típica"
+          value={stint.stddevMs !== null ? `±${(stint.stddevMs / 1000).toFixed(3)} s` : "—"}
+          size="base"
         />
         <div className="col-span-2 flex flex-wrap items-center gap-2">
-          <span className="text-xs uppercase text-muted/70">Consistencia</span>
-          <Badge variant={cons.tone === "danger" ? "accent" : cons.tone}>
-            {cons.label}
-          </Badge>
-          {stint.decayMsPerLap !== null && stint.laps.length >= 3 ? (
+          <span className="text-xs uppercase text-muted">Consistencia</span>
+          <Badge variant={cons.tone}>{cons.label}</Badge>
+          {stint.decayMsPerLap !== null ? (
             <Badge
               variant={
                 stint.decayMsPerLap > 50
@@ -144,30 +120,5 @@ function StintCard({ stint }: { stint: Stint }) {
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function Cell({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div>
-      <p className="text-xs uppercase tracking-wider text-muted/70">{label}</p>
-      <p
-        className={
-          accent
-            ? "tabular text-base font-semibold text-accent"
-            : "tabular text-base font-semibold text-foreground"
-        }
-      >
-        {value}
-      </p>
-    </div>
   );
 }

@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import { parseISO } from "date-fns";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -14,6 +15,7 @@ export function formatLapTime(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
 }
 
+/** Acepta `mm:ss.SSS`, `ss.SSS` o `ss,SSS`. Devuelve null si el formato no es válido. */
 export function parseLapTime(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -24,4 +26,9 @@ export function parseLapTime(input: string): number | null {
   const millis = m[3] ? parseInt(m[3].padEnd(3, "0"), 10) : 0;
   if (seconds >= 60) return null;
   return minutes * 60000 + seconds * 1000 + millis;
+}
+
+/** Interpreta una fecha `yyyy-MM-dd` en hora local, sin desplazarla por UTC. */
+export function parseDateOnly(value: string): Date {
+  return parseISO(value);
 }

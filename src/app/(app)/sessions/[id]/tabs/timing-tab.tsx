@@ -1,306 +1,269 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import {
-  ChevronDown,
-  ChevronRight,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
-  RotateCcw,
-  Trash2,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CircleParking, Pause, Play, Plus, RotateCcw, ShieldAlert, ShieldCheck, Undo2 } from "lucide-react";
+import { deleteLap } from "@/app/(app)/actions";
+import { LapChart } from "@/components/lap-chart";
+import { useSettings } from "@/components/settings-provider";
+import { useToast } from "@/components/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/input";
-import { deleteLap, recordLap, updateLap } from "@/app/(app)/actions";
-import { formatLapTime, parseLapTime, cn } from "@/lib/utils";
+import type { Stopwatch } from "@/hooks/use-stopwatch";
+import { useUndoableDelete } from "@/hooks/use-undoable-delete";
+import { TRACK_STATE_LABELS, TRACK_STATES } from "@/lib/labels";
+import { enqueue, removeOp } from "@/lib/outbox";
+import { bestSectorTimes, computeLapStats, theoreticalBestLap } from "@/lib/stats";
 import {
-  computeLapStats,
-  formatDelta,
-  lapDelta,
-  theoreticalBestLap,
-  bestSectorTimes,
-} from "@/lib/stats";
-import type { Database, TrackState } from "@/lib/supabase/types";
-import { LapChart } from "@/components/lap-chart";
+  applyManualLap,
+  markLap,
+  markSector,
+  reset,
+  start,
+  pause,
+  totalElapsed,
+  lapElapsed,
+  type MarkResult,
+} from "@/lib/stopwatch";
+import type { EventType, Lap, LapSector, Session, TrackState } from "@/lib/supabase/types";
+import { formatLapTime, parseLapTime } from "@/lib/utils";
+import { EditLapDialog } from "./edit-lap-dialog";
+import { LapTable } from "./lap-table";
+import { StopwatchDisplay } from "./stopwatch-display";
 
-type Session = Database["public"]["Tables"]["sessions"]["Row"];
-type Lap = Database["public"]["Tables"]["laps"]["Row"];
-type LapSector = Database["public"]["Tables"]["lap_sectors"]["Row"];
-
-const TRACK_STATES: TrackState[] = [
-  "Green Flag",
-  "Yellow Flag",
-  "Red Flag",
-  "Safety Car",
-  "Virtual Safety Car",
-  "Pit Lane",
+const QUICK_EVENTS: {
+  type: EventType;
+  label: string;
+  next: TrackState;
+  icon: typeof CircleParking;
+}[] = [
+  { type: "Pit In", label: "Pit In", next: "Pit Lane", icon: CircleParking },
+  { type: "Pit Out", label: "Pit Out", next: "Green Flag", icon: Undo2 },
+  { type: "Safety Car Sale", label: "Sale SC", next: "Safety Car", icon: ShieldAlert },
+  { type: "Safety Car Entra", label: "Entra SC", next: "Green Flag", icon: ShieldCheck },
 ];
 
-function trackStateVariant(s: TrackState) {
-  if (s === "Green Flag") return "success" as const;
-  if (s === "Yellow Flag") return "warning" as const;
-  if (s === "Red Flag") return "accent" as const;
-  if (s === "Safety Car" || s === "Virtual Safety Car") return "info" as const;
-  return "muted" as const;
-}
+// Fuera del componente: quickEvent solo se ejecuta al pulsar, nunca al renderizar.
+const timestamp = () => Date.now();
 
 export function TimingTab({
   session,
-  laps,
+  laps: allLaps,
   sectors,
+  pendingIds,
+  failed,
+  stopwatch,
+  active,
 }: {
   session: Session;
   laps: Lap[];
   sectors: LapSector[];
+  pendingIds: Set<string>;
+  failed: Map<string, string>;
+  stopwatch: Stopwatch;
+  active: boolean;
 }) {
+  const router = useRouter();
+  const toast = useToast();
+  const { settings } = useSettings();
+  const { state, current, commit } = stopwatch;
+
   const sectorsCount = session.sectors_count ?? 0;
   const useSectors = sectorsCount > 0;
 
-  // Running timer state
-  const [running, setRunning] = useState(false);
-  const [elapsedTotal, setElapsedTotal] = useState(0);
-  const [elapsedLap, setElapsedLap] = useState(0);
-  const [elapsedSector, setElapsedSector] = useState(0);
-  const totalAtStartRef = useRef(0);
-  const lapAtStartRef = useRef(0);
-  const sectorAtStartRef = useRef(0);
-  const startMsRef = useRef<number | null>(null);
-  const rafRef = useRef<number | null>(null);
-
-  // Sector accumulator for in-progress lap
-  const [pendingSectors, setPendingSectors] = useState<number[]>([]);
-
   const [trackState, setTrackState] = useState<TrackState>("Green Flag");
-  const [manualTime, setManualTime] = useState("");
   const [note, setNote] = useState("");
-  const [, startTransition] = useTransition();
+  const [manualTime, setManualTime] = useState("");
   const [editingLap, setEditingLap] = useState<Lap | null>(null);
 
-  // RAF loop
-  useEffect(() => {
-    if (!running) return;
-    let cancelled = false;
-    const tick = () => {
-      if (cancelled || startMsRef.current === null) return;
-      const now = performance.now();
-      const delta = now - startMsRef.current;
-      setElapsedTotal(totalAtStartRef.current + delta);
-      setElapsedLap(lapAtStartRef.current + delta);
-      setElapsedSector(sectorAtStartRef.current + delta);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [running]);
+  const { hidden, remove } = useUndoableDelete(async (lapId) => {
+    const result = await deleteLap(session.id, lapId).catch(() => null);
+    if (!result?.ok) {
+      toast({ message: result?.error ?? "Sin conexión: no se pudo borrar la vuelta.", tone: "error" });
+    }
+    router.refresh();
+  });
 
-  // Spacebar shortcut: lap (or next sector if sectors enabled)
+  const laps = useMemo(() => allLaps.filter((l) => !hidden.has(l.id)), [allLaps, hidden]);
+  const lastLap = laps[laps.length - 1];
+
+  function saveLap(lapMs: number, totalMs: number, lapSectors: number[] | null) {
+    enqueue({
+      kind: "lap",
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      createdAt: new Date().toISOString(),
+      lapTimeMs: lapMs,
+      totalTimeMs: totalMs,
+      trackState,
+      notes: note.trim() || null,
+      sectors: lapSectors,
+    });
+    setNote("");
+  }
+
+  function buzz() {
+    if (settings.vibrate) navigator.vibrate?.(35);
+  }
+
+  function mark() {
+    const now = Date.now();
+    const minLapMs = settings.minLapSeconds * 1000;
+    const result: MarkResult = useSectors
+      ? markSector(current(), now, sectorsCount, minLapMs / sectorsCount)
+      : markLap(current(), now, minLapMs);
+
+    if (result.kind === "ignored") {
+      toast({ message: "Pulsación ignorada: tiempo inferior al mínimo configurado." });
+      return;
+    }
+    commit(result.state);
+    buzz();
+    if (result.kind === "lap") {
+      saveLap(result.lap.lapMs, result.lap.totalMs, result.lap.sectors);
+    }
+  }
+
+  // El atajo de teclado siempre debe usar la versión más reciente de mark.
+  const markRef = useRef(mark);
   useEffect(() => {
+    markRef.current = mark;
+  });
+
+  useEffect(() => {
+    if (!active) return;
     function onKey(e: KeyboardEvent) {
+      if (e.code !== "Space" || e.repeat) return;
+      const target = e.target;
       if (
-        e.code === "Space" &&
-        !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement) &&
-        !(e.target instanceof HTMLSelectElement)
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
       ) {
-        e.preventDefault();
-        if (running) {
-          if (useSectors) recordCurrentSector();
-          else recordCurrentLap();
-        }
+        return;
       }
+      e.preventDefault();
+      if (current().runningSince !== null) markRef.current();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, useSectors, elapsedLap, elapsedSector, pendingSectors, trackState, note]);
+  }, [active, current]);
 
   function toggleRun() {
-    if (running) {
-      const now = performance.now();
-      const delta =
-        startMsRef.current !== null ? now - startMsRef.current : 0;
-      totalAtStartRef.current += delta;
-      lapAtStartRef.current += delta;
-      sectorAtStartRef.current += delta;
-      startMsRef.current = null;
-      setRunning(false);
-    } else {
-      startMsRef.current = performance.now();
-      setRunning(true);
-    }
+    const now = Date.now();
+    const s = current();
+    commit(s.runningSince === null ? start(s, now) : pause(s, now));
   }
 
   function resetTimer() {
-    setRunning(false);
-    startMsRef.current = null;
-    totalAtStartRef.current = 0;
-    lapAtStartRef.current = 0;
-    sectorAtStartRef.current = 0;
-    setElapsedTotal(0);
-    setElapsedLap(0);
-    setElapsedSector(0);
-    setPendingSectors([]);
-  }
-
-  function rebaseLap() {
-    lapAtStartRef.current -= elapsedLap;
-    setElapsedLap(0);
-  }
-  function rebaseSector() {
-    sectorAtStartRef.current -= elapsedSector;
-    setElapsedSector(0);
-  }
-
-  function recordCurrentSector() {
-    const secTime = Math.round(elapsedSector);
-    if (secTime <= 0) return;
-
-    const nextSectors = [...pendingSectors, secTime];
-    rebaseSector();
-
-    if (nextSectors.length >= sectorsCount) {
-      // Lap complete: sum of sectors as canonical lap time.
-      const lapTime = nextSectors.reduce((a, b) => a + b, 0);
-      const total = Math.round(elapsedTotal);
-      rebaseLap();
-      setPendingSectors([]);
-      const nextNumber = (laps[laps.length - 1]?.lap_number ?? 0) + 1;
-      startTransition(async () => {
-        await recordLap({
-          session_id: session.id,
-          lap_number: nextNumber,
-          lap_time_ms: lapTime,
-          total_time_ms: total,
-          track_state: trackState,
-          notes: note || undefined,
-          sectors: nextSectors,
-        });
-        setNote("");
-      });
-    } else {
-      setPendingSectors(nextSectors);
+    const s = current();
+    if (
+      (s.runningSince !== null || lapElapsed(s, Date.now()) > 0) &&
+      !confirm("¿Parar y poner a cero la vuelta en curso? Las vueltas ya registradas no se borran.")
+    ) {
+      return;
     }
-  }
-
-  function recordCurrentLap() {
-    const lapTime = Math.round(elapsedLap);
-    const total = Math.round(elapsedTotal);
-    if (lapTime <= 0) return;
-    rebaseLap();
-    rebaseSector();
-
-    const nextNumber = (laps[laps.length - 1]?.lap_number ?? 0) + 1;
-    startTransition(async () => {
-      await recordLap({
-        session_id: session.id,
-        lap_number: nextNumber,
-        lap_time_ms: lapTime,
-        total_time_ms: total,
-        track_state: trackState,
-        notes: note || undefined,
-      });
-      setNote("");
-    });
+    commit(reset(lastLap?.total_time_ms ?? 0));
   }
 
   function recordManualLap() {
     const ms = parseLapTime(manualTime);
-    if (ms === null) return;
-    const total = Math.round(elapsedTotal) + ms;
-    const nextNumber = (laps[laps.length - 1]?.lap_number ?? 0) + 1;
-    startTransition(async () => {
-      await recordLap({
-        session_id: session.id,
-        lap_number: nextNumber,
-        lap_time_ms: ms,
-        total_time_ms: total,
-        track_state: trackState,
-        notes: note || undefined,
-      });
-      setManualTime("");
-      setNote("");
-    });
+    if (ms === null || ms <= 0) {
+      toast({ message: "Tiempo no válido. Usa mm:ss.SSS o ss.SSS.", tone: "error" });
+      return;
+    }
+    const { state: next, totalMs } = applyManualLap(
+      current(),
+      ms,
+      lastLap?.total_time_ms ?? 0,
+      Date.now(),
+    );
+    commit(next);
+    saveLap(ms, totalMs, null);
+    setManualTime("");
   }
 
-  function onDelete(lapId: string) {
-    startTransition(async () => {
-      await deleteLap(session.id, lapId);
+  function quickEvent(type: EventType, nextState: TrackState) {
+    const now = timestamp();
+    let s = current();
+    if (type === "Pit Out" && s.runningSince === null) {
+      s = start(s, now);
+      commit(s);
+    }
+    enqueue({
+      kind: "event",
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      createdAt: new Date().toISOString(),
+      eventType: type,
+      lapNumber: (lastLap?.lap_number ?? 0) + 1,
+      elapsedMs: Math.round(totalElapsed(s, now)),
+      notes: note.trim() || null,
     });
+    setNote("");
+    setTrackState(nextState);
+    buzz();
+    toast({ message: `${type} registrado`, tone: "success", duration: 1800 });
+  }
+
+  function onDelete(lap: Lap) {
+    if (pendingIds.has(lap.id)) {
+      removeOp(lap.id);
+      return;
+    }
+    remove(lap.id, `Vuelta ${lap.lap_number} borrada`);
   }
 
   const stats = computeLapStats(laps);
-  const bestLapId = stats.bestId;
-  const bestSectors = useSectors ? bestSectorTimes(sectors, sectorsCount) : [];
-  const theoBest = useSectors
-    ? theoreticalBestLap(bestSectors)
-    : null;
+  const visibleSectors = useMemo(
+    () => sectors.filter((s) => !hidden.has(s.lap_id)),
+    [sectors, hidden],
+  );
+  const bestSectors = useSectors ? bestSectorTimes(visibleSectors, sectorsCount) : [];
+  const theoBest = useSectors ? theoreticalBestLap(bestSectors) : null;
 
-  // Index sectors by lap id for table rendering
-  const sectorsByLap = new Map<string, LapSector[]>();
-  for (const s of sectors) {
-    const arr = sectorsByLap.get(s.lap_id) ?? [];
-    arr.push(s);
-    sectorsByLap.set(s.lap_id, arr);
-  }
-  for (const arr of sectorsByLap.values()) {
-    arr.sort((a, b) => a.sector_number - b.sector_number);
-  }
+  const sectorsByLap = useMemo(() => {
+    const map = new Map<string, LapSector[]>();
+    for (const s of visibleSectors) {
+      const list = map.get(s.lap_id) ?? [];
+      list.push(s);
+      map.set(s.lap_id, list);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.sector_number - b.sector_number);
+    return map;
+  }, [visibleSectors]);
 
-  const sectorButtonLabel = useSectors
-    ? `Sector ${pendingSectors.length + 1}/${sectorsCount}${
-        pendingSectors.length + 1 === sectorsCount ? " (vuelta)" : ""
-      }`
+  const running = state.runningSince !== null;
+  const hasStarted = running || state.accumulated > state.lapMark;
+  const canMark = useSectors ? running || state.accumulated > state.sectorMark : hasStarted;
+  const nextSector = state.pendingSectors.length + 1;
+  const markLabel = useSectors
+    ? `Sector ${nextSector}/${sectorsCount}${nextSector === sectorsCount ? " (vuelta)" : ""}`
     : "Vuelta";
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row">
-      <div className="flex-1 space-y-4">
+      <div className="min-w-0 flex-1 space-y-4">
         <Card>
           <CardHeader className="border-b-0 pb-2">
             <CardTitle className="text-xs uppercase tracking-widest text-muted">
-              Cronometro
+              Cronómetro
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col items-center gap-6 pt-2">
-            <div className="text-center">
-              <p className="text-xs uppercase tracking-widest text-muted">
-                {useSectors ? "Sector en curso" : "Vuelta en curso"}
-              </p>
-              <p
-                className={cn(
-                  "tabular text-6xl font-bold tracking-tight sm:text-7xl",
-                  running ? "text-accent" : "text-foreground",
-                )}
-              >
-                {formatLapTime(useSectors ? elapsedSector : elapsedLap)}
-              </p>
-              <div className="mt-1 flex flex-wrap justify-center gap-3 text-xs text-muted">
-                <span>
-                  Vuelta:{" "}
-                  <span className="tabular">{formatLapTime(elapsedLap)}</span>
-                </span>
-                <span>
-                  Total:{" "}
-                  <span className="tabular">{formatLapTime(elapsedTotal)}</span>
-                </span>
+          <CardContent className="flex flex-col items-center gap-5 pt-2">
+            <StopwatchDisplay state={state} useSectors={useSectors} />
+
+            {useSectors && state.pendingSectors.length > 0 ? (
+              <div className="flex flex-wrap justify-center gap-1.5">
+                {state.pendingSectors.map((s, i) => (
+                  <Badge key={i} variant="info">
+                    S{i + 1}: {formatLapTime(s)}
+                  </Badge>
+                ))}
               </div>
-              {useSectors && pendingSectors.length > 0 ? (
-                <div className="mt-2 flex flex-wrap justify-center gap-1.5">
-                  {pendingSectors.map((s, i) => (
-                    <Badge key={i} variant="info">
-                      S{i + 1}: {formatLapTime(s)}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            ) : null}
 
             <div className="flex w-full max-w-md flex-wrap gap-2">
               <Button
@@ -315,32 +278,68 @@ export function TimingTab({
                   </>
                 ) : (
                   <>
-                    <Play className="h-5 w-5" />{" "}
-                    {elapsedTotal > 0 ? "Reanudar" : "Iniciar"}
+                    <Play className="h-5 w-5" /> {state.accumulated > 0 ? "Reanudar" : "Iniciar"}
                   </>
                 )}
               </Button>
               <Button
-                onClick={useSectors ? recordCurrentSector : recordCurrentLap}
+                onClick={mark}
                 size="xl"
-                disabled={
-                  useSectors ? elapsedSector <= 0 : elapsedLap <= 0
-                }
+                disabled={!canMark}
                 className="flex-1 min-w-[140px]"
               >
-                <Plus className="h-5 w-5" /> {sectorButtonLabel}
+                <Plus className="h-5 w-5" /> {markLabel}
               </Button>
-              <Button
-                onClick={resetTimer}
-                size="xl"
-                variant="outline"
-                aria-label="Reset"
-              >
+              <Button onClick={resetTimer} size="xl" variant="outline" aria-label="Poner a cero">
                 <RotateCcw className="h-5 w-5" />
               </Button>
             </div>
-            <p className="text-[11px] text-muted/70">
-              Atajo: pulsa <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-mono">Espacio</kbd>{" "}
+
+            <div className="grid w-full max-w-md grid-cols-4 gap-2">
+              {QUICK_EVENTS.map((q) => {
+                const Icon = q.icon;
+                return (
+                  <Button
+                    key={q.type}
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 flex-col gap-0.5 px-1"
+                    onClick={() => quickEvent(q.type, q.next)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {q.label}
+                  </Button>
+                );
+              })}
+            </div>
+
+            <div className="grid w-full max-w-md gap-3 sm:grid-cols-2">
+              <Field label="Estado de pista">
+                <Select
+                  value={trackState}
+                  onChange={(e) => setTrackState(e.target.value as TrackState)}
+                >
+                  {TRACK_STATES.map((s) => (
+                    <option key={s} value={s}>
+                      {TRACK_STATE_LABELS[s]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Nota de la próxima vuelta">
+                <Input
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Opcional"
+                />
+              </Field>
+            </div>
+
+            <p className="hidden text-xs text-muted sm:block">
+              Atajo: pulsa{" "}
+              <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-xs">
+                Espacio
+              </kbd>{" "}
               para registrar {useSectors ? "sector" : "vuelta"}.
             </p>
           </CardContent>
@@ -350,25 +349,17 @@ export function TimingTab({
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-2 py-4">
               <div>
-                <p className="text-xs uppercase tracking-wider text-muted/70">
-                  Vuelta teorica (suma mejores sectores)
+                <p className="text-xs uppercase tracking-wider text-muted">
+                  Vuelta teórica (suma de mejores sectores)
                 </p>
-                <p className="tabular text-2xl font-bold text-accent">
-                  {formatLapTime(theoBest)}
-                </p>
+                <p className="tabular text-2xl font-bold text-accent">{formatLapTime(theoBest)}</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
-                {bestSectors.map((s, i) =>
-                  s !== null ? (
-                    <Badge key={i} variant="info">
-                      S{i + 1}: {formatLapTime(s)}
-                    </Badge>
-                  ) : (
-                    <Badge key={i} variant="muted">
-                      S{i + 1}: —
-                    </Badge>
-                  ),
-                )}
+                {bestSectors.map((s, i) => (
+                  <Badge key={i} variant={s !== null ? "info" : "muted"}>
+                    S{i + 1}: {s !== null ? formatLapTime(s) : "—"}
+                  </Badge>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -377,7 +368,7 @@ export function TimingTab({
         {laps.length >= 2 ? (
           <Card>
             <CardHeader>
-              <CardTitle>Evolucion de tiempos</CardTitle>
+              <CardTitle>Evolución de tiempos</CardTitle>
             </CardHeader>
             <CardContent>
               <LapChart laps={laps} />
@@ -389,37 +380,19 @@ export function TimingTab({
           <CardHeader>
             <CardTitle>Registrar vuelta manual</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-            <Field label="Tiempo (mm:ss.SSS)">
+          <CardContent className="flex items-end gap-3">
+            <Field label="Tiempo (mm:ss.SSS)" className="flex-1">
               <Input
                 value={manualTime}
                 onChange={(e) => setManualTime(e.target.value)}
                 placeholder="01:23.456"
+                inputMode="decimal"
               />
             </Field>
-            <Field label="Estado pista">
-              <Select
-                value={trackState}
-                onChange={(e) => setTrackState(e.target.value as TrackState)}
-              >
-                {TRACK_STATES.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Anadir" className="self-end">
-              <Button onClick={recordManualLap} disabled={!manualTime} size="md">
-                <Plus className="h-4 w-4" />
-                Anadir
-              </Button>
-            </Field>
-            <Field label="Notas vuelta" className="sm:col-span-3">
-              <Input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Comentario opcional para la proxima vuelta"
-              />
-            </Field>
+            <Button onClick={recordManualLap} disabled={!manualTime} size="md">
+              <Plus className="h-4 w-4" />
+              Añadir
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -432,19 +405,21 @@ export function TimingTab({
           <CardContent className="p-0">
             {laps.length === 0 ? (
               <p className="px-5 py-12 text-center text-sm text-muted">
-                Aun no hay vueltas registradas.
+                Aún no hay vueltas registradas.
               </p>
             ) : (
               <div className="max-h-[520px] overflow-y-auto">
                 <LapTable
                   laps={laps}
-                  bestLapId={bestLapId}
+                  bestLapId={stats.bestId}
                   bestMs={stats.bestMs}
                   sectorsByLap={sectorsByLap}
                   bestSectors={bestSectors}
                   useSectors={useSectors}
                   sectorsCount={sectorsCount}
-                  onEdit={(l) => setEditingLap(l)}
+                  pendingIds={pendingIds}
+                  failed={failed}
+                  onEdit={setEditingLap}
                   onDelete={onDelete}
                 />
               </div>
@@ -457,246 +432,11 @@ export function TimingTab({
         <EditLapDialog
           lap={editingLap}
           sessionId={session.id}
+          sectorsCount={sectorsCount}
+          sectors={sectorsByLap.get(editingLap.id) ?? []}
           onClose={() => setEditingLap(null)}
         />
       ) : null}
-    </div>
-  );
-}
-
-function LapTable({
-  laps,
-  bestLapId,
-  bestMs,
-  sectorsByLap,
-  bestSectors,
-  useSectors,
-  sectorsCount,
-  onEdit,
-  onDelete,
-}: {
-  laps: Lap[];
-  bestLapId: string | null;
-  bestMs: number | null;
-  sectorsByLap: Map<string, LapSector[]>;
-  bestSectors: (number | null)[];
-  useSectors: boolean;
-  sectorsCount: number;
-  onEdit: (lap: Lap) => void;
-  onDelete: (lapId: string) => void;
-}) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  return (
-    <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-surface/95 backdrop-blur">
-        <tr className="text-left text-xs uppercase tracking-wider text-muted">
-          <th className="px-3 py-2 font-medium">#</th>
-          <th className="px-3 py-2 font-medium">Tiempo</th>
-          <th className="px-3 py-2 font-medium">Δ</th>
-          <th className="px-3 py-2 font-medium">Estado</th>
-          <th className="px-3 py-2"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {laps.map((lap) => {
-          const isBest = lap.id === bestLapId;
-          const delta = lapDelta(lap.lap_time_ms, bestMs);
-          const lapSectors = sectorsByLap.get(lap.id) ?? [];
-          const hasSectors = useSectors && lapSectors.length > 0;
-          const expanded = expandedId === lap.id;
-          return (
-            <>
-              <tr
-                key={lap.id}
-                className="border-t border-border/60 hover:bg-surface/60"
-              >
-                <td className="px-3 py-2 tabular text-muted">
-                  <button
-                    onClick={() =>
-                      hasSectors && setExpandedId(expanded ? null : lap.id)
-                    }
-                    className={
-                      hasSectors
-                        ? "flex items-center gap-1 hover:text-foreground"
-                        : ""
-                    }
-                  >
-                    {hasSectors ? (
-                      expanded ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )
-                    ) : null}
-                    {String(lap.lap_number).padStart(2, "0")}
-                  </button>
-                </td>
-                <td
-                  className={cn(
-                    "px-3 py-2 tabular font-medium",
-                    isBest && "text-accent",
-                  )}
-                >
-                  {formatLapTime(lap.lap_time_ms)}
-                </td>
-                <td
-                  className={cn(
-                    "px-3 py-2 tabular text-xs",
-                    isBest && "text-accent font-semibold",
-                    !isBest && delta !== null && delta > 0 && "text-amber-400",
-                  )}
-                >
-                  {isBest ? "—" : formatDelta(delta)}
-                </td>
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={trackStateVariant(lap.track_state as TrackState)}
-                  >
-                    {lap.track_state}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    onClick={() => onEdit(lap)}
-                    className="rounded p-1 text-muted hover:text-foreground hover:bg-surface-hover"
-                    aria-label="Editar"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => onDelete(lap.id)}
-                    className="rounded p-1 text-muted hover:text-red-400 hover:bg-red-500/10"
-                    aria-label="Borrar"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </td>
-              </tr>
-              {hasSectors && expanded ? (
-                <tr className="border-t border-border/40 bg-surface/30">
-                  <td colSpan={5} className="px-6 py-2">
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {Array.from({ length: sectorsCount }, (_, i) => {
-                        const sec = lapSectors.find(
-                          (s) => s.sector_number === i + 1,
-                        );
-                        const isBestSec =
-                          sec && bestSectors[i] === sec.time_ms;
-                        return (
-                          <div
-                            key={i}
-                            className={cn(
-                              "rounded border border-border/60 bg-surface px-2 py-1",
-                              isBestSec && "border-accent/50 bg-accent/10",
-                            )}
-                          >
-                            <span className="mr-1 text-muted/70">
-                              S{i + 1}
-                            </span>
-                            <span
-                              className={cn(
-                                "tabular font-medium",
-                                isBestSec ? "text-accent" : "text-foreground",
-                              )}
-                            >
-                              {sec ? formatLapTime(sec.time_ms) : "—"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-            </>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
-function EditLapDialog({
-  lap,
-  sessionId,
-  onClose,
-}: {
-  lap: Lap;
-  sessionId: string;
-  onClose: () => void;
-}) {
-  const [time, setTime] = useState(formatLapTime(lap.lap_time_ms));
-  const [state, setState] = useState<TrackState>(lap.track_state as TrackState);
-  const [notes, setNotes] = useState(lap.notes ?? "");
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  function save() {
-    const ms = parseLapTime(time);
-    if (ms === null) {
-      setError("Formato invalido. Usa mm:ss.SSS o ss.SSS");
-      return;
-    }
-    startTransition(async () => {
-      try {
-        await updateLap({
-          session_id: sessionId,
-          lap_id: lap.id,
-          lap_time_ms: ms,
-          track_state: state,
-          notes: notes || null,
-        });
-        onClose();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Error al guardar");
-      }
-    });
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
-      onClick={onClose}
-    >
-      <Card
-        className="w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <CardHeader>
-          <CardTitle>Editar vuelta #{lap.lap_number}</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <Field label="Tiempo">
-            <Input value={time} onChange={(e) => setTime(e.target.value)} />
-          </Field>
-          <Field label="Estado pista">
-            <Select
-              value={state}
-              onChange={(e) => setState(e.target.value as TrackState)}
-            >
-              {TRACK_STATES.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Notas">
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </Field>
-          {error ? (
-            <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={onClose} disabled={pending}>
-              Cancelar
-            </Button>
-            <Button onClick={save} disabled={pending}>
-              {pending ? "Guardando..." : "Guardar"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

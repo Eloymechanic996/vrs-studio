@@ -1,94 +1,50 @@
 # Deployment
 
-Guía paso a paso para desplegar VRS Studio desde cero en otra cuenta.
+Guía para desplegar VRS Studio desde cero en otra cuenta.
 
 ## 1. Supabase
 
-### Crear el proyecto
+1. Crea un proyecto en <https://supabase.com/dashboard> (Europa para España).
+2. Con la CLI v3 y el proyecto enlazado (`supabase link --project-ref <ref>`):
 
-1. Entra en <https://supabase.com/dashboard> → **New project**.
-2. Región: la más cercana a los usuarios (Europe West para España).
-3. Apunta la **Database password** que generes (no la necesitarás para la app
-   pero sí si quieres acceder vía `psql`).
-4. Espera ~2 min a que el proyecto esté listo.
+   ```bash
+   supabase db push --remote --yes
+   ```
 
-### Aplicar migraciones
+   Aplica las migraciones de [`supabase/migrations/`](./supabase/migrations/) en orden.
+3. En `Authentication → URL Configuration`:
+   - **Site URL:** tu dominio final (ej. `https://vrs-studio.vercel.app`).
+   - **Redirect URLs:** `https://<tu-dominio>/**` y `http://localhost:3000/**`.
 
-`Database → SQL Editor → New query`:
+   Sin esto, los correos de confirmación apuntan a `localhost`.
+4. En `Settings → API` copia la URL y la clave pública (*publishable*).
 
-1. Pega el contenido de [`supabase/migrations/0001_initial_schema.sql`](./supabase/migrations/0001_initial_schema.sql) → Run.
-2. Pega el contenido de [`supabase/migrations/0002_sectors_share_realtime.sql`](./supabase/migrations/0002_sectors_share_realtime.sql) → Run.
+Los correos de confirmación y de contraseña llegan a `/auth/confirm`. El plan gratuito
+envía muy pocos correos por hora: para más usuarios configura un SMTP propio.
 
-Ambas migraciones son **idempotentes**: puedes correrlas varias veces sin miedo.
-Si ves errores tipo `duplicate_object`, los puedes ignorar (vienen de objetos
-que ya existían).
-
-### Realtime
-
-La migración 0002 ya añade las tablas a la publicación `supabase_realtime`. Si
-quieres comprobarlo: `Database → Replication → supabase_realtime`. Debes ver
-`sessions`, `laps`, `events` y `lap_sectors`.
-
-### Auth
-
-`Authentication → Providers → Email`: activado por defecto.
-
-Si quieres signup sin confirmación de correo (útil para pruebas internas):
-`Authentication → Sign In / Up → Email → desactivar "Confirm email"`.
-
-### URL Configuration
-
-`Authentication → URL Configuration`:
-
-- **Site URL:** tu dominio final (ej. `https://vrs-studio-web.vercel.app`).
-- **Redirect URLs:** añade `https://<tu-dominio>/**` y, si usas previews,
-  `https://*.vercel.app/**`.
-
-Sin esto, los emails de confirmación apuntan a `localhost`.
-
-### Obtener las claves
-
-`Settings → API`:
-
-- `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-- `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `service_role` → `SUPABASE_SERVICE_ROLE_KEY` (no expuesta al navegador)
-
----
+La app no usa la clave `service_role`.
 
 ## 2. Vercel
 
-### Opción A — CLI (sin GitHub)
+Variables necesarias (Production, Preview y Development):
+
+| Variable | Valor |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave pública (publishable) |
+
+Importa el repositorio, marca `web` como rama de producción y deja el framework en Next.js.
+[`vercel.json`](./vercel.json) programa una llamada diaria a `/api/health` para que el
+proyecto gratuito de Supabase no se pause por inactividad.
+
+### Comprobación
 
 ```bash
-cd vrs-studio-web
-npx vercel login                       # si no estás logueado
-npx vercel link --yes --project vrs-studio-web
-
-# Añadir env vars (cada comando lee el valor de stdin):
-echo "https://<tu-proyecto>.supabase.co" | npx vercel env add NEXT_PUBLIC_SUPABASE_URL production
-echo "<anon-public-key>" | npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
-echo "<service-role-key>" | npx vercel env add SUPABASE_SERVICE_ROLE_KEY production
-
-npx vercel deploy --prod --yes
-```
-
-### Opción B — GitHub integration
-
-1. En Vercel: **Add New… → Project → Import from GitHub**.
-2. Selecciona el repo y la rama `web`.
-3. **Root Directory:** `vrs-studio-web` (si el repo tiene la app en subcarpeta).
-4. **Build Command:** dejar el default (`npm run build`).
-5. Añade las 3 env vars en `Project Settings → Environment Variables` antes
-   del primer deploy.
-
-### Smoke test
-
-```bash
-curl -I https://<tu-dominio>/login        # 200
-curl -I https://<tu-dominio>/sw.js        # 200
+curl -I https://<tu-dominio>/login         # 200
+curl -I https://<tu-dominio>/sw.js         # 200
 curl -I https://<tu-dominio>/manifest.json # 200
-curl -I https://<tu-dominio>/             # 307 a /login (proxy auth)
+curl -I https://<tu-dominio>/              # 307 a /login
+curl    https://<tu-dominio>/api/health    # {"ok":true}
 ```
 
 ---
@@ -131,7 +87,6 @@ Requisitos:
 Construir:
 
 ```bash
-cd vrs-studio-web
 node scripts/generate-tauri-icons.mjs  # solo la primera vez
 npm install --save-dev @tauri-apps/cli
 npx tauri build
@@ -146,7 +101,6 @@ brew install --cask visual-studio-code  # opcional
 # Necesitas Xcode Command Line Tools:
 xcode-select --install
 
-cd vrs-studio-web
 node scripts/generate-tauri-icons.mjs
 npx tauri build
 ```
@@ -190,13 +144,11 @@ Checklist completo tras desplegar:
 
 ### Realtime no funciona
 - En Supabase: `Database → Replication → supabase_realtime` debe tener
-  `sessions`, `laps`, `events`, `lap_sectors`. La migración 0002 las añade,
-  pero si fallaron silenciosamente, añádelas manualmente desde la UI.
+  `sessions`, `laps`, `events`, `lap_sectors`. Las migraciones las añaden.
 
-### Share público da 404
-- El slug se genera vía `generate_session_slug()` (función SQL en migración
-  0002). Si no existe, el toggle falla en silencio.
-- Verifica: `select pg_get_functiondef('public.generate_session_slug'::regproc);`
+### Enlace público da 404
+- La sesión debe estar marcada como pública. La página usa la función SQL
+  `get_public_session`, incluida en las migraciones.
 
 ### Tauri build falla en CI
 - `windows-latest`: WebView2 SDK debería estar en el runner. Si falla,

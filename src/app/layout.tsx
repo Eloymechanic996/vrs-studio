@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { RegisterPWA } from "@/components/register-pwa";
 import { InstallPrompt } from "@/components/install-prompt";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/settings";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,7 +17,7 @@ const geistMono = Geist_Mono({
 
 const APP_NAME = "VRS Studio";
 const APP_DESCRIPTION =
-  "Control de competicion. Tiempos, eventos y setup en pista.";
+  "Control de competición. Tiempos, eventos y setup en pista.";
 
 export const metadata: Metadata = {
   applicationName: APP_NAME,
@@ -47,8 +48,6 @@ export const viewport: Viewport = {
   themeColor: "#dc2626",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
 };
 
@@ -60,9 +59,15 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      data-appearance="racing"
+      data-theme="dark"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-neutral-950 text-neutral-100">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
+      <body className="min-h-full flex flex-col">
         <RegisterPWA />
         {children}
         <InstallPrompt />

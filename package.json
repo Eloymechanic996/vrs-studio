@@ -1,12 +1,14 @@
 {
-  "name": "vrs-studio-web",
+  "name": "vrs-studio",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "cross-env SERWIST_SUPPRESS_TURBOPACK_WARNING=1 next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
@@ -16,24 +18,29 @@
     "date-fns": "^4.3.0",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.16.0",
-    "next": "16.2.6",
+    "next": "^16.4.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.6.0",
-    "zustand": "^5.0.13"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@serwist/next": "^9.5.11",
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "cross-env": "^10.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "^16.4.5",
     "png-to-ico": "^3.0.1",
     "serwist": "^9.5.11",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

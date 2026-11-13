@@ -4,7 +4,7 @@
 > Cronómetro con sectores, análisis de pace, comparativa entre sesiones, link
 > público para compartir, y export a Excel. PWA instalable + binario desktop.
 
-**Live:** <https://vrs-studio-web.vercel.app>
+**Live:** <https://vrs-studio.vercel.app>
 
 ---
 
@@ -37,7 +37,9 @@ antes había que sacar a mano en Excel.
 - Link público read-only (`/s/<slug>`).
 
 ### Cronómetro
-- Start / pause / reset / registrar vuelta.
+- Start / pause / reset / registrar vuelta, con tiempo mínimo configurable.
+- Sobrevive a cambios de pestaña, recargas y bloqueos de pantalla.
+- Botones rápidos de Pit In, Pit Out y Safety Car.
 - Atajo `Espacio` en desktop.
 - Soporte de sectores: el botón cicla `S1 → S2 → … → vuelta`.
 - Estado de pista: Green / Yellow / Red Flag, Safety Car, VSC, Pit Lane.
@@ -60,23 +62,28 @@ antes había que sacar a mano en Excel.
 - Stats lado a lado, diferencia B−A, tabla vuelta a vuelta coloreada.
 - Gráfica de evolución con ambas series superpuestas.
 
+### Configuración
+- Apariencia: temas Oscuro, Claro, Automático y Sol directo; estilos Racing, Lo-fi,
+  Aviación, Militar y Mecánica.
+- Ajustes de cronómetro, datos por defecto y gestión de la cuenta.
+
 ### Multi-dispositivo
 - Realtime sync: el mecánico apunta una vuelta en el móvil y al ingeniero le
   aparece en el portátil sin recargar.
 - PWA instalable en Android/Chrome/Edge (un click) y iOS (hint manual).
-- Funciona offline tras la primera carga (Service Worker cacheando).
+- Sin cobertura las vueltas y eventos se guardan en el dispositivo y se envían al recuperarla.
 
 ### Privacidad
 - Sesiones privadas por defecto (RLS owner-only).
-- Toggle "Pública" por sesión: genera slug aleatorio y URL pública read-only.
-- Borrado en cascada al eliminar sesión o cuenta.
+- Toggle "Pública" por sesión: enlace de solo lectura, sin setup ni notas de sesión.
+- Descarga de todos los datos y borrado de cuenta desde Configuración.
 
 ---
 
 ## Estructura del repo
 
 ```
-vrs-studio-web/
+vrs-studio/
 ├── src/                           # Código de la webapp
 │   ├── app/
 │   │   ├── (app)/                 # Rutas protegidas (auth required)
@@ -110,8 +117,7 @@ vrs-studio-web/
 │   └── icons/
 ├── supabase/
 │   └── migrations/
-│       ├── 0001_initial_schema.sql
-│       └── 0002_sectors_share_realtime.sql
+│       └── *.sql                  # Migraciones con fecha
 ├── public/
 │   ├── manifest.json              # PWA manifest
 │   ├── sw.js                      # Service worker (generado en build)
@@ -148,10 +154,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://<tu-proyecto>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-public-key>
 ```
 
-Aplica migraciones en Supabase (SQL Editor):
-
-1. `supabase/migrations/0001_initial_schema.sql` — tablas base + RLS
-2. `supabase/migrations/0002_sectors_share_realtime.sql` — sectores, share, realtime
+Aplica las migraciones con la CLI de Supabase: `supabase db push --remote --yes`.
 
 Configura `Authentication → URL Configuration` en Supabase:
 - `Site URL`: la URL donde vas a desplegar
@@ -173,6 +176,7 @@ npm run dev
 | `npm run build` | Build de producción (webpack, requerido por Serwist PWA) |
 | `npm run start` | Sirve el build de producción |
 | `npm run lint` | ESLint |
+| `npm test` | Tests de estadísticas y cronómetro |
 | `npx tsc --noEmit` | Type check |
 | `python scripts/build-changelog-pdf.py` | Regenera el PDF de cambios |
 | `node scripts/generate-tauri-icons.mjs` | Regenera iconos para Tauri |
@@ -183,8 +187,7 @@ npm run dev
 
 Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
 
-Resumen: `npx vercel deploy --prod` con las 3 env vars configuradas
-(`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
+Resumen: `npx vercel deploy --prod` con `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
 ## Desktop (Tauri)
 
@@ -224,7 +227,7 @@ como release de GitHub.
 
 - [DEPLOYMENT.md](./DEPLOYMENT.md) — guía completa de despliegue (Supabase, Vercel, Tauri)
 - [VRS-Studio-Cambios.pdf](./VRS-Studio-Cambios.pdf) — resumen visual de cambios para tu equipo
-- [supabase/migrations/](./supabase/migrations/) — schema SQL idempotente
+- [supabase/migrations/](./supabase/migrations/) — esquema SQL
 
 ## Licencia
 

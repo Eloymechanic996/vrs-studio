@@ -2,22 +2,17 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { ArrowLeft, GitCompare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { MultiLapChart } from "@/components/lap-chart";
+import { StatCell } from "@/components/stat-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { computeLapStats, consistencyLabel, formatDelta } from "@/lib/stats";
-import { formatLapTime } from "@/lib/utils";
-import { MultiLapChart } from "@/components/lap-chart";
+import type { Lap, Session } from "@/lib/supabase/types";
+import { cn, formatLapTime, parseDateOnly } from "@/lib/utils";
 import { CompareSelector } from "./compare-selector";
-import type { Database } from "@/lib/supabase/types";
 
-type Session = Database["public"]["Tables"]["sessions"]["Row"];
-type Lap = Database["public"]["Tables"]["laps"]["Row"];
+type SessionWithLaps = { session: Session; laps: Lap[] };
 
 export default async function ComparePage({
   searchParams,
@@ -31,9 +26,8 @@ export default async function ComparePage({
     .from("sessions")
     .select("id, name, date, circuit, driver, modality, session_type")
     .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  const sessionList = sessions ?? [];
+    .order("created_at", { ascending: false })
+    .limit(200);
 
   const [sessionA, sessionB] = await Promise.all([
     a ? loadSessionWithLaps(supabase, a) : Promise.resolve(null),
@@ -50,17 +44,11 @@ export default async function ComparePage({
         </Link>
         <div className="flex items-center gap-2">
           <GitCompare className="h-5 w-5 text-accent" />
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-            Comparar sesiones
-          </h1>
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Comparar sesiones</h1>
         </div>
       </div>
 
-      <CompareSelector
-        sessions={sessionList}
-        selectedA={a ?? null}
-        selectedB={b ?? null}
-      />
+      <CompareSelector sessions={sessions ?? []} selectedA={a ?? null} selectedB={b ?? null} />
 
       {sessionA && sessionB ? (
         <ComparisonResult a={sessionA} b={sessionB} />
@@ -75,17 +63,11 @@ export default async function ComparePage({
   );
 }
 
-type SessionWithLaps = { session: Session; laps: Lap[] };
-
 async function loadSessionWithLaps(
   supabase: Awaited<ReturnType<typeof createClient>>,
   id: string,
 ): Promise<SessionWithLaps | null> {
-  const { data: session } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+  const { data: session } = await supabase.from("sessions").select("*").eq("id", id).maybeSingle();
   if (!session) return null;
   const { data: laps } = await supabase
     .from("laps")
@@ -95,38 +77,37 @@ async function loadSessionWithLaps(
   return { session, laps: laps ?? [] };
 }
 
-function ComparisonResult({
-  a,
-  b,
-}: {
-  a: SessionWithLaps;
-  b: SessionWithLaps;
-}) {
+function diffClass(diff: number | null) {
+  if (diff === null || diff === 0) return "text-muted";
+  return diff < 0 ? "text-success font-semibold" : "text-warning";
+}
+
+function ComparisonResult({ a, b }: { a: SessionWithLaps; b: SessionWithLaps }) {
   const statsA = computeLapStats(a.laps);
   const statsB = computeLapStats(b.laps);
-  const maxLaps = Math.max(a.laps.length, b.laps.length);
-  const consA = consistencyLabel(statsA.cv);
-  const consB = consistencyLabel(statsB.cv);
+  const lapsA = new Map(a.laps.map((l) => [l.lap_number, l]));
+  const lapsB = new Map(b.laps.map((l) => [l.lap_number, l]));
+  const numbers = [...new Set([...lapsA.keys(), ...lapsB.keys()])].sort((x, y) => x - y);
 
   return (
     <div className="grid gap-4">
       <div className="grid gap-3 md:grid-cols-2">
-        <SessionCard label="A" session={a.session} stats={statsA} consistency={consA} />
-        <SessionCard label="B" session={b.session} stats={statsB} consistency={consB} />
+        <SessionCard label="A" session={a.session} stats={statsA} />
+        <SessionCard label="B" session={b.session} stats={statsB} />
       </div>
 
       <StatsDiff statsA={statsA} statsB={statsB} />
 
-      {(a.laps.length >= 2 || b.laps.length >= 2) ? (
+      {a.laps.length >= 2 || b.laps.length >= 2 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Evolucion de tiempos</CardTitle>
+            <CardTitle>Evolución de tiempos</CardTitle>
           </CardHeader>
           <CardContent>
             <MultiLapChart
               series={[
-                { label: `A · ${a.session.name}`, color: "#DC2626", laps: a.laps },
-                { label: `B · ${b.session.name}`, color: "#38BDF8", laps: b.laps },
+                { label: `A · ${a.session.name}`, color: "var(--accent)", laps: a.laps },
+                { label: `B · ${b.session.name}`, color: "var(--info)", laps: b.laps },
               ]}
             />
           </CardContent>
@@ -140,45 +121,25 @@ function ComparisonResult({
         <CardContent className="p-0">
           <div className="max-h-[520px] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-surface/95 backdrop-blur">
+              <thead className="sticky top-0 bg-surface">
                 <tr className="text-left text-xs uppercase tracking-wider text-muted">
                   <th className="px-3 py-2 font-medium">Vuelta</th>
                   <th className="px-3 py-2 font-medium">A</th>
                   <th className="px-3 py-2 font-medium">B</th>
-                  <th className="px-3 py-2 font-medium">B - A</th>
+                  <th className="px-3 py-2 font-medium">B − A</th>
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: maxLaps }, (_, i) => {
-                  const lapA = a.laps[i];
-                  const lapB = b.laps[i];
-                  const diff =
-                    lapA && lapB ? lapB.lap_time_ms - lapA.lap_time_ms : null;
+                {numbers.map((n) => {
+                  const lapA = lapsA.get(n);
+                  const lapB = lapsB.get(n);
+                  const diff = lapA && lapB ? lapB.lap_time_ms - lapA.lap_time_ms : null;
                   return (
-                    <tr
-                      key={i}
-                      className="border-t border-border/60 hover:bg-surface/60"
-                    >
-                      <td className="px-3 py-2 tabular text-muted">
-                        {String(i + 1).padStart(2, "0")}
-                      </td>
-                      <td className="px-3 py-2 tabular">
-                        {lapA ? formatLapTime(lapA.lap_time_ms) : "—"}
-                      </td>
-                      <td className="px-3 py-2 tabular">
-                        {lapB ? formatLapTime(lapB.lap_time_ms) : "—"}
-                      </td>
-                      <td
-                        className={
-                          diff === null
-                            ? "px-3 py-2 tabular text-xs text-muted"
-                            : diff < 0
-                              ? "px-3 py-2 tabular text-xs text-green-400 font-semibold"
-                              : diff > 0
-                                ? "px-3 py-2 tabular text-xs text-amber-400"
-                                : "px-3 py-2 tabular text-xs text-muted"
-                        }
-                      >
+                    <tr key={n} className="border-t border-border/60 hover:bg-surface/60">
+                      <td className="px-3 py-2 tabular text-muted">{String(n).padStart(2, "0")}</td>
+                      <td className="px-3 py-2 tabular">{lapA ? formatLapTime(lapA.lap_time_ms) : "—"}</td>
+                      <td className="px-3 py-2 tabular">{lapB ? formatLapTime(lapB.lap_time_ms) : "—"}</td>
+                      <td className={cn("px-3 py-2 tabular text-xs", diffClass(diff))}>
                         {diff === null ? "—" : formatDelta(diff)}
                       </td>
                     </tr>
@@ -197,13 +158,12 @@ function SessionCard({
   label,
   session,
   stats,
-  consistency,
 }: {
   label: string;
   session: Session;
   stats: ReturnType<typeof computeLapStats>;
-  consistency: ReturnType<typeof consistencyLabel>;
 }) {
+  const consistency = consistencyLabel(stats.cv);
   return (
     <Card>
       <CardHeader>
@@ -212,39 +172,19 @@ function SessionCard({
           <CardTitle className="truncate">{session.name}</CardTitle>
         </div>
         <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted">
-          <span>{format(new Date(session.date), "dd/MM/yyyy")}</span>
+          <span>{format(parseDateOnly(session.date), "dd/MM/yyyy")}</span>
           {session.circuit ? <span>· {session.circuit}</span> : null}
           {session.driver ? <span>· {session.driver}</span> : null}
         </div>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3 text-sm">
-        <Stat
-          k="Mejor"
-          v={stats.bestMs !== null ? formatLapTime(stats.bestMs) : "—"}
-          accent
-        />
-        <Stat
-          k="Media (limpias)"
-          v={stats.averageMs !== null ? formatLapTime(stats.averageMs) : "—"}
-        />
-        <Stat
-          k="Desv. tipica"
-          v={
-            stats.stddevMs !== null
-              ? `±${(stats.stddevMs / 1000).toFixed(3)} s`
-              : "—"
-          }
-        />
-        <Stat k="Vueltas / verdes" v={`${stats.count} / ${stats.cleanCount}`} />
+        <StatCell label="Mejor" value={stats.bestMs !== null ? formatLapTime(stats.bestMs) : "—"} accent size="base" />
+        <StatCell label="Media (limpias)" value={stats.averageMs !== null ? formatLapTime(stats.averageMs) : "—"} size="base" />
+        <StatCell label="Desv. típica" value={stats.stddevMs !== null ? `±${(stats.stddevMs / 1000).toFixed(3)} s` : "—"} size="base" />
+        <StatCell label="Vueltas / limpias" value={`${stats.count} / ${stats.cleanCount}`} size="base" />
         <div className="col-span-2 flex items-center gap-2 pt-1">
-          <span className="text-xs uppercase text-muted/70">Consistencia</span>
-          <Badge
-            variant={
-              consistency.tone === "danger" ? "accent" : consistency.tone
-            }
-          >
-            {consistency.label}
-          </Badge>
+          <span className="text-xs uppercase text-muted">Consistencia</span>
+          <Badge variant={consistency.tone}>{consistency.label}</Badge>
         </div>
       </CardContent>
     </Card>
@@ -259,94 +199,30 @@ function StatsDiff({
   statsB: ReturnType<typeof computeLapStats>;
 }) {
   const bestDiff =
-    statsA.bestMs !== null && statsB.bestMs !== null
-      ? statsB.bestMs - statsA.bestMs
-      : null;
+    statsA.bestMs !== null && statsB.bestMs !== null ? statsB.bestMs - statsA.bestMs : null;
   const meanDiff =
-    statsA.averageMs !== null && statsB.averageMs !== null
-      ? statsB.averageMs - statsA.averageMs
-      : null;
+    statsA.averageMs !== null && statsB.averageMs !== null ? statsB.averageMs - statsA.averageMs : null;
+  const cvDiff = statsA.cv !== null && statsB.cv !== null ? statsB.cv - statsA.cv : null;
 
-  return (
-    <Card>
-      <CardHeader className="border-b-0 pb-2">
-        <CardTitle className="text-xs uppercase tracking-widest text-muted">
-          Diferencia B − A
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-4 pt-0 sm:grid-cols-3">
-        <DiffCell label="Mejor vuelta" diffMs={bestDiff} />
-        <DiffCell label="Media (limpias)" diffMs={meanDiff} />
-        <DiffCell
-          label="Consistencia (CV)"
-          customValue={
-            statsA.cv !== null && statsB.cv !== null
-              ? `${((statsB.cv - statsA.cv) * 100).toFixed(2)} %`
-              : "—"
-          }
-          customTone={
-            statsA.cv !== null && statsB.cv !== null
-              ? statsB.cv < statsA.cv
-                ? "good"
-                : statsB.cv > statsA.cv
-                  ? "bad"
-                  : "neutral"
-              : "neutral"
-          }
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-function DiffCell({
-  label,
-  diffMs,
-  customValue,
-  customTone,
-}: {
-  label: string;
-  diffMs?: number | null;
-  customValue?: string;
-  customTone?: "good" | "bad" | "neutral";
-}) {
-  let value = customValue ?? "—";
-  let tone: "good" | "bad" | "neutral" = customTone ?? "neutral";
-  if (customValue === undefined && diffMs !== null && diffMs !== undefined) {
-    value = formatDelta(diffMs);
-    tone = diffMs < 0 ? "good" : diffMs > 0 ? "bad" : "neutral";
-  }
-  return (
+  const cell = (label: string, value: string, diff: number | null) => (
     <div>
-      <p className="text-xs uppercase tracking-wider text-muted/70">{label}</p>
-      <p
-        className={
-          tone === "good"
-            ? "tabular text-lg font-semibold text-green-400"
-            : tone === "bad"
-              ? "tabular text-lg font-semibold text-amber-400"
-              : "tabular text-lg font-semibold text-foreground"
-        }
-      >
+      <p className="text-xs uppercase tracking-wider text-muted">{label}</p>
+      <p className={cn("tabular text-lg font-semibold", diff === null || diff === 0 ? "text-foreground" : diff < 0 ? "text-success" : "text-warning")}>
         {value}
       </p>
     </div>
   );
-}
 
-function Stat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
   return (
-    <div>
-      <p className="text-xs uppercase tracking-wider text-muted/70">{k}</p>
-      <p
-        className={
-          accent
-            ? "tabular text-base font-semibold text-accent"
-            : "tabular text-base font-semibold text-foreground"
-        }
-      >
-        {v}
-      </p>
-    </div>
+    <Card>
+      <CardHeader className="border-b-0 pb-2">
+        <CardTitle className="text-xs uppercase tracking-widest text-muted">Diferencia B − A</CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 gap-4 pt-0 sm:grid-cols-3">
+        {cell("Mejor vuelta", formatDelta(bestDiff), bestDiff)}
+        {cell("Media (limpias)", formatDelta(meanDiff === null ? null : Math.round(meanDiff)), meanDiff)}
+        {cell("Consistencia (CV)", cvDiff === null ? "—" : `${(cvDiff * 100).toFixed(2)} %`, cvDiff)}
+      </CardContent>
+    </Card>
   );
 }

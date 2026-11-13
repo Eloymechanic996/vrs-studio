@@ -1,43 +1,139 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #0a0a0a;
-  --color-surface: #111111;
-  --color-surface-hover: #1a1a1a;
-  --color-border: #262626;
-  --color-foreground: #f5f5f5;
-  --color-muted: #a3a3a3;
-  --color-accent: #dc2626;
-  --color-accent-hover: #ef4444;
-  --color-accent-glow: rgba(220, 38, 38, 0.18);
-  --color-warning: #f59e0b;
-  --color-success: #22c55e;
-  --color-info: #38bdf8;
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-foreground: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-2: var(--accent-2);
+  --color-on-accent: var(--on-accent);
+  --color-accent-glow: color-mix(in srgb, var(--accent) 20%, transparent);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-:root {
+/* Colores semánticos según la claridad del tema */
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
+  --warning: #f59e0b;
+  --success: #22c55e;
+  --info: #38bdf8;
+  --danger: #f87171;
+  --glow-opacity: 8%;
+}
+
+:root[data-theme="light"],
+:root[data-theme="sun"] {
+  color-scheme: light;
+  --warning: #b45309;
+  --success: #15803d;
+  --info: #0369a1;
+  --danger: #b91c1c;
+  --glow-opacity: 6%;
+}
+
+/* Racing */
+:root,
+:root[data-appearance="racing"][data-theme="dark"] {
+  --bg: #0a0a0a; --surface: #111111; --surface-hover: #1a1a1a; --border: #262626;
+  --fg: #f5f5f5; --muted: #a3a3a3;
+  --accent: #dc2626; --accent-hover: #ef4444; --accent-2: #f97316; --on-accent: #ffffff;
+}
+:root[data-appearance="racing"][data-theme="light"],
+:root[data-appearance="racing"][data-theme="sun"] {
+  --bg: #f7f7f8; --surface: #ffffff; --surface-hover: #efeff1; --border: #d9d9de;
+  --fg: #18181b; --muted: #5f5f68;
+  --accent: #c81e1e; --accent-hover: #b91c1c; --accent-2: #ea580c; --on-accent: #ffffff;
+}
+
+/* Lo-fi */
+:root[data-appearance="lofi"][data-theme="dark"] {
+  --bg: #1c1925; --surface: #252131; --surface-hover: #2f2a3e; --border: #3d3750;
+  --fg: #f3eef8; --muted: #b3a9c4;
+  --accent: #d98775; --accent-hover: #e59a89; --accent-2: #b9afd0; --on-accent: #1c1925;
+}
+:root[data-appearance="lofi"][data-theme="light"],
+:root[data-appearance="lofi"][data-theme="sun"] {
+  --bg: #f6f1ea; --surface: #fffdf9; --surface-hover: #efe8df; --border: #ddd2c4;
+  --fg: #2d2738; --muted: #6d6479;
+  --accent: #b3553f; --accent-hover: #9c4733; --accent-2: #7d6fa3; --on-accent: #ffffff;
+}
+
+/* Aviación */
+:root[data-appearance="aviation"][data-theme="dark"] {
+  --bg: #0f1513; --surface: #16201c; --surface-hover: #1e2b26; --border: #2b3b34;
+  --fg: #e3efe6; --muted: #9db3a4;
+  --accent: #7fb08a; --accent-hover: #93c29e; --accent-2: #c9a227; --on-accent: #0f1513;
+}
+:root[data-appearance="aviation"][data-theme="light"],
+:root[data-appearance="aviation"][data-theme="sun"] {
+  --bg: #eef2ee; --surface: #ffffff; --surface-hover: #e3e9e4; --border: #cbd5cd;
+  --fg: #16231d; --muted: #56675d;
+  --accent: #2f6b45; --accent-hover: #265a39; --accent-2: #8a6d10; --on-accent: #ffffff;
+}
+
+/* Militar */
+:root[data-appearance="military"][data-theme="dark"] {
+  --bg: #1b1d16; --surface: #24271d; --surface-hover: #2e3225; --border: #3f4433;
+  --fg: #ece8d6; --muted: #b3ad92;
+  --accent: #a3b26e; --accent-hover: #b4c280; --accent-2: #b0a276; --on-accent: #1b1d16;
+}
+:root[data-appearance="military"][data-theme="light"],
+:root[data-appearance="military"][data-theme="sun"] {
+  --bg: #f0ede0; --surface: #fbf9f0; --surface-hover: #e6e2d2; --border: #d3cdb6;
+  --fg: #26281e; --muted: #5f5f4b;
+  --accent: #56633a; --accent-hover: #48532f; --accent-2: #8a7c4f; --on-accent: #ffffff;
+}
+
+/* Mecánica */
+:root[data-appearance="mechanic"][data-theme="dark"] {
+  --bg: #15181a; --surface: #1e2326; --surface-hover: #283033; --border: #384145;
+  --fg: #e9edee; --muted: #a3aeb2;
+  --accent: #d08a5a; --accent-hover: #dd9c6f; --accent-2: #8d999d; --on-accent: #15181a;
+}
+:root[data-appearance="mechanic"][data-theme="light"],
+:root[data-appearance="mechanic"][data-theme="sun"] {
+  --bg: #eef0f1; --surface: #ffffff; --surface-hover: #e3e6e8; --border: #cfd5d8;
+  --fg: #1c2124; --muted: #5a6569;
+  --accent: #a55f2f; --accent-hover: #8f5127; --accent-2: #5f6b70; --on-accent: #ffffff;
+}
+
+/* Sol directo: máximo contraste con cualquier estilo */
+:root[data-appearance][data-theme="sun"] {
+  --bg: #ffffff; --surface: #ffffff; --surface-hover: #eeeeee; --border: #000000;
+  --fg: #000000; --muted: #262626;
+  --glow-opacity: 0%;
+  font-size: 112%;
+}
+:root[data-theme="sun"] .tabular {
+  font-weight: 700;
 }
 
 body {
   background:
-    radial-gradient(1200px 600px at 90% -10%, rgba(220, 38, 38, 0.08), transparent 60%),
-    radial-gradient(1000px 600px at -10% 110%, rgba(56, 189, 248, 0.05), transparent 60%),
-    #0a0a0a;
-  color: #f5f5f5;
+    radial-gradient(1200px 600px at 90% -10%, color-mix(in srgb, var(--accent) var(--glow-opacity), transparent), transparent 60%),
+    radial-gradient(1000px 600px at -10% 110%, color-mix(in srgb, var(--info) var(--glow-opacity), transparent), transparent 60%),
+    var(--bg);
+  color: var(--fg);
   font-family: var(--font-sans), system-ui, sans-serif;
   font-feature-settings: "ss01", "ss02", "cv11";
   -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
-  background: rgba(220, 38, 38, 0.35);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-/* Numeric / timer monospaced display */
+/* Números y cronómetro con ancho fijo */
 .tabular {
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono), ui-monospace, monospace;
@@ -46,19 +142,15 @@ body {
 /* Scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #404040 transparent;
+  scrollbar-color: var(--border) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #262626;
+  background: var(--border);
   border-radius: 8px;
   border: 2px solid transparent;
-  background-clip: padding-box;
-}
-*::-webkit-scrollbar-thumb:hover {
-  background: #404040;
   background-clip: padding-box;
 }

@@ -13,7 +13,7 @@
       {
         "title": "VRS Studio",
         "label": "main",
-        "url": "https://vrs-studio-web.vercel.app",
+        "url": "https://vrs-studio.vercel.app",
         "width": 1320,
         "height": 860,
         "minWidth": 920,
@@ -41,7 +41,7 @@
     "longDescription": "VRS Studio - registra sesiones, vueltas, sectores, eventos y setup. Analiza pace, stints y compara sesiones. Empaquetado desde la PWA web.",
     "publisher": "VRS Studio",
     "copyright": "",
-    "homepage": "https://vrs-studio-web.vercel.app",
+    "homepage": "https://vrs-studio.vercel.app",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -39,7 +39,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Setup Rust
@@ -72,7 +72,7 @@ jobs:
         with:
           # The tauri-action picks up tauri.conf.json automatically.
           # We don't bundle the Next.js app — the desktop binary wraps
-          # the live PWA at https://vrs-studio-web.vercel.app
+          # the live PWA at https://vrs-studio.vercel.app
           args: ""
 
       - name: Upload installers
