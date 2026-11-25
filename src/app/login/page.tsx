@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { Timer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AUTH_MESSAGES, knownMessage } from "@/lib/auth-messages";
+import { getSocialLogins } from "@/lib/auth-providers";
+import { ForgetDevice } from "./forget-device";
 import { LoginForm, type LoginMode } from "./login-form";
 
 const TITLES: Record<LoginMode, string> = {
@@ -14,15 +17,20 @@ const TITLES: Record<LoginMode, string> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string; error?: string; notice?: string }>;
+  searchParams: Promise<{ mode?: string; error?: string | string[]; notice?: string | string[] }>;
 }) {
-  const { mode: rawMode, error, notice } = await searchParams;
+  const params = await searchParams;
+  const rawMode = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  // Solo avisos propios: un texto inventado en el enlace no se muestra.
+  const error = knownMessage(params.error);
+  const notice = knownMessage(params.notice);
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (user) redirect("/");
 
+  const social = await getSocialLogins();
   const mode: LoginMode = rawMode === "signup" || rawMode === "forgot" ? rawMode : "signin";
   const link = "text-accent hover:underline";
 
@@ -44,7 +52,8 @@ export default async function LoginPage({
             <CardTitle>{TITLES[mode]}</CardTitle>
           </CardHeader>
           <CardContent>
-            <LoginForm mode={mode} error={error} notice={notice} />
+            <ForgetDevice accountDeleted={notice === AUTH_MESSAGES.accountDeleted} />
+            <LoginForm mode={mode} error={error} notice={notice} social={social} />
             <div className="mt-4 space-y-1 text-center text-xs text-muted">
               {mode === "signin" ? (
                 <>

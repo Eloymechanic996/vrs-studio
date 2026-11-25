@@ -48,43 +48,72 @@ const SYNCED_TTL_MS = 2 * 60 * 1000;
 const EMPTY: OutboxOp[] = [];
 
 let ops: OutboxOp[] | null = null;
+/** false si el último guardado falló (almacenamiento lleno o bloqueado): manda la memoria. */
+let storageOk = true;
 let flushing: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const afterSyncListeners = new Set<() => void>();
 
+/** Lee la cola del almacenamiento; si no hay, se queda con la copia en memoria. */
+function load(): OutboxOp[] {
+  if (!storageOk) return ops ?? [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return ops ?? [];
+  }
+}
+
+/** Copia estable para React: solo cambia cuando la cola cambia. */
 function read(): OutboxOp[] {
   if (ops !== null) return ops;
   if (typeof window === "undefined") return EMPTY;
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    ops = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    ops = [];
-  }
-  return ops ?? EMPTY;
+  ops = load();
+  return ops;
 }
 
 function write(next: OutboxOp[]) {
   ops = next;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    storageOk = true;
   } catch {
     // Sin almacenamiento disponible la cola sigue viva en memoria.
+    storageOk = false;
   }
   listeners.forEach((l) => l());
 }
 
+/**
+ * Cada cambio parte de lo que hay guardado ahora mismo, no de la copia en
+ * memoria: si otra pestaña ha añadido vueltas mientras tanto, no se pisan.
+ */
+function mutate(change: (current: OutboxOp[]) => OutboxOp[]) {
+  if (typeof window === "undefined") return;
+  write(change(load()));
+}
+
+if (typeof window !== "undefined") {
+  // Otra pestaña ha cambiado la cola: se descarta la copia y se vuelve a leer.
+  window.addEventListener("storage", (e) => {
+    if (e.key !== STORAGE_KEY && e.key !== null) return;
+    ops = null;
+    listeners.forEach((l) => l());
+  });
+}
+
 function patch(id: string, change: Partial<OutboxOp>) {
-  write(read().map((op) => (op.id === id ? ({ ...op, ...change } as OutboxOp) : op)));
+  mutate((list) => list.map((op) => (op.id === id ? ({ ...op, ...change } as OutboxOp) : op)));
 }
 
 export function enqueue(op: OutboxOp) {
-  write([...read(), op]);
+  mutate((list) => [...list, op]);
   void flushOutbox();
 }
 
 export function removeOp(id: string) {
-  write(read().filter((op) => op.id !== id));
+  mutate((list) => list.filter((op) => op.id !== id));
 }
 
 export function retryOp(id: string) {
@@ -95,11 +124,9 @@ export function retryOp(id: string) {
 /** Retira lo ya confirmado y visible en los datos del servidor. */
 export function pruneSynced(serverIds: Set<string>) {
   const now = Date.now();
-  const current = read();
-  const next = current.filter(
-    (op) => !(op.synced && (serverIds.has(op.id) || now - (op.syncedAt ?? 0) > SYNCED_TTL_MS)),
-  );
-  if (next.length !== current.length) write(next);
+  const stale = (op: OutboxOp) =>
+    Boolean(op.synced && (serverIds.has(op.id) || now - (op.syncedAt ?? 0) > SYNCED_TTL_MS));
+  if (read().some(stale)) mutate((list) => list.filter((op) => !stale(op)));
 }
 
 export function onOutboxSynced(listener: () => void) {

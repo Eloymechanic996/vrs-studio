@@ -17,9 +17,16 @@ type SessionWithLaps = { session: Session; laps: Lap[] };
 export default async function ComparePage({
   searchParams,
 }: {
-  searchParams: Promise<{ a?: string; b?: string }>;
+  searchParams: Promise<{ a?: string | string[]; b?: string | string[] }>;
 }) {
-  const { a, b } = await searchParams;
+  const params = await searchParams;
+  // Solo identificadores válidos; un parámetro repetido llega como lista.
+  const pick = (v: string | string[] | undefined) => {
+    const s = Array.isArray(v) ? v[0] : v;
+    return s && /^[0-9a-f-]{36}$/i.test(s) ? s : undefined;
+  };
+  const a = pick(params.a);
+  const b = pick(params.b);
   const supabase = await createClient();
 
   const { data: sessions } = await supabase

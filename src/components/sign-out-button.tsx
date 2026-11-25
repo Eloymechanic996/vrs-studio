@@ -4,12 +4,7 @@ import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/app/(app)/actions";
 import { useOutbox } from "@/lib/outbox";
-
-async function clearPrivateCaches() {
-  if (!("caches" in window)) return;
-  const names = await caches.keys();
-  await Promise.all(names.filter((n) => !n.includes("precache")).map((n) => caches.delete(n)));
-}
+import { clearPrivateCaches, forgetSyncedOutbox } from "@/lib/private-data";
 
 export function SignOutButton() {
   const queue = useOutbox();
@@ -23,6 +18,7 @@ export function SignOutButton() {
       return;
     }
     await clearPrivateCaches().catch(() => {});
+    forgetSyncedOutbox();
     await signOut();
   }
 

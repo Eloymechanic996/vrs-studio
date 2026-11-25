@@ -3,9 +3,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { AUTH_MESSAGES as M, MIN_PASSWORD } from "@/lib/auth-messages";
+import { isRecoverySession } from "@/lib/recovery";
 import { createClient } from "@/lib/supabase/server";
-
-const MIN_PASSWORD = 8;
 
 async function confirmUrl(next: string) {
   const origin = (await headers()).get("origin") ?? "";
@@ -14,13 +14,13 @@ async function confirmUrl(next: string) {
 
 function errorMessage(message: string): string {
   const known: Record<string, string> = {
-    "Invalid login credentials": "Correo o contraseña incorrectos.",
-    "Email not confirmed": "Confirma tu correo antes de entrar. Revisa tu bandeja de entrada.",
-    "User already registered": "Ya existe una cuenta con ese correo.",
+    "Invalid login credentials": M.wrongCredentials,
+    "Email not confirmed": M.emailNotConfirmed,
+    "User already registered": M.alreadyRegistered,
   };
-  if (known[message]) return known[message];
-  if (/rate limit/i.test(message)) return "Demasiados intentos. Espera unos minutos.";
-  return "No se ha podido completar la operación.";
+  if (Object.hasOwn(known, message)) return known[message];
+  if (/rate limit/i.test(message)) return M.rateLimited;
+  return M.generic;
 }
 
 const back = (mode: string, param: "error" | "notice", text: string): never =>
@@ -29,7 +29,7 @@ const back = (mode: string, param: "error" | "notice", text: string): never =>
 export async function signInWithPassword(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
-  if (!email || !password) back("", "error", "Faltan el correo o la contraseña.");
+  if (!email || !password) back("", "error", M.missingCredentials);
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -43,7 +43,7 @@ export async function signUpWithPassword(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   if (!email || password.length < MIN_PASSWORD) {
-    back("signup", "error", `Indica un correo y una contraseña de al menos ${MIN_PASSWORD} caracteres.`);
+    back("signup", "error", M.signupInvalid);
   }
 
   const supabase = await createClient();
@@ -59,12 +59,12 @@ export async function signUpWithPassword(formData: FormData) {
     redirect("/");
   }
 
-  back("", "notice", "Revisa tu correo para confirmar la cuenta.");
+  back("", "notice", M.checkEmail);
 }
 
 export async function requestPasswordReset(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
-  if (!email) back("forgot", "error", "Indica tu correo.");
+  if (!email) back("forgot", "error", M.missingEmail);
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -73,20 +73,24 @@ export async function requestPasswordReset(formData: FormData) {
   if (error && /rate limit/i.test(error.message)) back("forgot", "error", errorMessage(error.message));
 
   // Mismo mensaje exista o no la cuenta, para no revelar quién está registrado.
-  back("", "notice", "Si ese correo tiene cuenta, recibirás un enlace para cambiar la contraseña.");
+  back("", "notice", M.resetSent);
 }
 
 export async function setNewPassword(formData: FormData) {
   const password = String(formData.get("password") ?? "");
-  if (password.length < MIN_PASSWORD) {
-    redirect(`/reset-password?error=${encodeURIComponent(`Usa al menos ${MIN_PASSWORD} caracteres.`)}`);
-  }
+  const again = (text: string): never =>
+    redirect(`/reset-password?error=${encodeURIComponent(text)}`);
+  if (password.length < MIN_PASSWORD) again(M.passwordTooShort);
+  if (new TextEncoder().encode(password).length > 72) again(M.passwordTooLong);
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.updateUser({ password });
-  if (error) {
-    redirect(`/reset-password?error=${encodeURIComponent("No se pudo cambiar. Prueba con otra contraseña.")}`);
+  // Solo desde el enlace del correo de recuperación; con una sesión normal el
+  // cambio se hace en Configuración, pidiendo la contraseña actual.
+  if (!(await isRecoverySession(supabase))) {
+    redirect(`/login?error=${encodeURIComponent(M.resetExpired)}`);
   }
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) again(M.passwordRejected);
   revalidatePath("/", "layout");
   redirect("/");
 }

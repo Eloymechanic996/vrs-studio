@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, GitCompare, Plus, Search, Timer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -22,12 +23,15 @@ const PAGE_SIZE = 24;
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; type?: string; page?: string }>;
+  searchParams: Promise<{ q?: string | string[]; type?: string | string[]; page?: string | string[] }>;
 }) {
   const params = await searchParams;
-  const q = (params.q ?? "").trim();
-  const type = SESSION_TYPES.find((t) => t === params.type) as SessionType | undefined;
-  const page = Math.max(1, Number(params.page) || 1);
+  // Un parámetro repetido en la URL (?q=a&q=b) llega como lista: se usa el primero.
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+  const q = first(params.q).trim().slice(0, 100);
+  const type = SESSION_TYPES.find((t) => t === first(params.type)) as SessionType | undefined;
+  const requestedPage = Math.trunc(Number(first(params.page)));
+  const page = Number.isFinite(requestedPage) && requestedPage > 1 ? Math.min(requestedPage, 10000) : 1;
 
   const supabase = await createClient();
   let query = supabase
@@ -44,7 +48,7 @@ export default async function DashboardPage({
     if (safe) query = query.or(`name.ilike.%${safe}%,circuit.ilike.%${safe}%,driver.ilike.%${safe}%`);
   }
 
-  const { data: sessions, count } = await query;
+  const { data: sessions, count, error } = await query;
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const filtering = Boolean(q || type);
 
@@ -56,6 +60,9 @@ export default async function DashboardPage({
     const s = sp.toString();
     return s ? `/?${s}` : "/";
   };
+
+  // Página que no existe (?page=99): a la última que sí tiene sesiones.
+  if (page > totalPages && count !== null) redirect(pageHref(totalPages));
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,7 +109,19 @@ export default async function DashboardPage({
         </Button>
       </form>
 
-      {!sessions || sessions.length === 0 ? (
+      {error && !sessions ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <CardTitle>No se pudieron cargar tus sesiones</CardTitle>
+            <CardDescription>
+              Tus datos siguen guardados. Comprueba la conexión y recarga la página.
+            </CardDescription>
+            <Link href="/" className="mt-2">
+              <Button variant="secondary">Reintentar</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : !sessions || sessions.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
             <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/10 text-accent">

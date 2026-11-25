@@ -106,6 +106,11 @@ export function ProfileForm({
       setError("Elige una imagen (JPG, PNG o WebP).");
       return;
     }
+    // Una foto gigante se decodifica entera y puede colgar el móvil.
+    if (file.size > 15 * 1024 * 1024) {
+      setError("La imagen pesa demasiado (máximo 15 MB).");
+      return;
+    }
     setUploading(true);
     setError(null);
     try {

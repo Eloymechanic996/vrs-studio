@@ -8,7 +8,8 @@ import { Field, Input, Select } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { TRACK_STATE_LABELS, TRACK_STATES } from "@/lib/labels";
 import type { Lap, LapSector, TrackState } from "@/lib/supabase/types";
-import { formatLapTime, parseLapTime } from "@/lib/utils";
+import { useSettings } from "@/components/settings-provider";
+import { formatLapTime, lapTimeProblem, MAX_LAP_MS, parseLapTime } from "@/lib/utils";
 
 export function EditLapDialog({
   lap,
@@ -23,6 +24,7 @@ export function EditLapDialog({
   sectors: LapSector[];
   onClose: () => void;
 }) {
+  const { settings } = useSettings();
   const editSectors = sectorsCount > 0 && sectors.length > 0;
   const [time, setTime] = useState(formatLapTime(lap.lap_time_ms));
   const [sectorTimes, setSectorTimes] = useState(() =>
@@ -44,8 +46,9 @@ export function EditLapDialog({
 
   function save() {
     const ms = editSectors ? sectorSum : parseLapTime(time);
-    if (ms === null || ms <= 0) {
-      setError("Formato no válido. Usa mm:ss.SSS o ss.SSS.");
+    const problem = lapTimeProblem(ms !== null && ms > MAX_LAP_MS ? null : ms, settings.minLapSeconds);
+    if (problem !== null || ms === null) {
+      setError(problem ?? "Formato no válido. Usa mm:ss.SSS o ss.SSS.");
       return;
     }
     startTransition(async () => {
@@ -115,7 +118,7 @@ export function EditLapDialog({
             </Select>
           </Field>
           <Field label="Notas">
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
           </Field>
           {error ? <Notice tone="error">{error}</Notice> : null}
           <div className="flex justify-end gap-2 pt-2">

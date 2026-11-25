@@ -144,23 +144,28 @@ export interface Stint {
   pitInMs: number | null;
 }
 
+/**
+ * Empareja Pit In y Pit Out en orden de tiempo. Un Pit In repetido con la
+ * parada ya abierta (doble toque) se ignora, y un Pit Out sin Pit In también.
+ */
 function pitPairs(events: LapEvent[]): { inMs: number; outMs: number | null }[] {
-  const times = (type: EventType) =>
-    events
-      .filter((e) => e.event_type === type)
-      .map((e) => e.elapsed_ms)
-      .sort((a, b) => a - b);
-  const pitIns = times("Pit In");
-  const pitOuts = times("Pit Out");
+  const isPit = (type: EventType) => type === "Pit In" || type === "Pit Out";
+  const pit = events
+    .filter((e) => isPit(e.event_type as EventType))
+    .sort((a, b) => a.elapsed_ms - b.elapsed_ms);
 
-  let outIdx = 0;
-  return pitIns.map((inMs) => {
-    while (outIdx < pitOuts.length && pitOuts[outIdx] < inMs) outIdx++;
-    const outMs = pitOuts[outIdx];
-    if (outMs === undefined) return { inMs, outMs: null };
-    outIdx++;
-    return { inMs, outMs };
-  });
+  const pairs: { inMs: number; outMs: number | null }[] = [];
+  let open: number | null = null;
+  for (const e of pit) {
+    if (e.event_type === "Pit In") {
+      if (open === null) open = e.elapsed_ms;
+    } else if (open !== null) {
+      pairs.push({ inMs: open, outMs: e.elapsed_ms });
+      open = null;
+    }
+  }
+  if (open !== null) pairs.push({ inMs: open, outMs: null });
+  return pairs;
 }
 
 function linearSlope(points: { x: number; y: number }[]): number | null {

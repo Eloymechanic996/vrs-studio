@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { createClient } from "@/lib/supabase/server";
+import { xlsxTemplateProblem } from "@/lib/xlsx-guard";
 import {
   EVENT_TYPE_LABELS,
   SESSION_TYPE_LABELS,
@@ -20,7 +21,8 @@ import type { Lap, LapEvent, LapSector, Session, Setup } from "@/lib/supabase/ty
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
+// Vercel corta las peticiones de más de 4,5 MB antes de llegar aquí.
+const MAX_TEMPLATE_BYTES = 4 * 1024 * 1024;
 const SHEET_NAMES = ["Resumen", "Tiempos", "Sectores", "Stints", "Eventos", "Setup"];
 
 /** Excel guarda los tiempos como fracción de día; así se pueden sumar y graficar. */
@@ -42,7 +44,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Falta la plantilla." }, { status: 400 });
   }
   if (file.size > MAX_TEMPLATE_BYTES) {
-    return NextResponse.json({ error: "La plantilla supera los 5 MB." }, { status: 413 });
+    return NextResponse.json({ error: "La plantilla supera los 4 MB." }, { status: 413 });
   }
   return buildResponse(id, await file.arrayBuffer());
 }
@@ -74,27 +76,41 @@ async function buildResponse(id: string, template: ArrayBuffer | null) {
 
   const wb = new ExcelJS.Workbook();
   if (template) {
+    const problem = xlsxTemplateProblem(template);
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 });
     try {
       await wb.xlsx.load(template);
     } catch {
       return NextResponse.json({ error: "El archivo no es un .xlsx válido." }, { status: 400 });
     }
-    for (const name of SHEET_NAMES) {
-      const existing = wb.getWorksheet(name);
-      if (existing) wb.removeWorksheet(existing.id);
+    // Excel no distingue mayúsculas en los nombres de hoja: "RESUMEN" choca con "Resumen".
+    const ours = new Set(SHEET_NAMES.map((n) => n.toLowerCase()));
+    for (const ws of [...wb.worksheets]) {
+      if (ours.has(ws.name.toLowerCase())) wb.removeWorksheet(ws.id);
     }
   }
   wb.creator = "VRS Studio";
   wb.created = new Date();
 
-  buildSummarySheet(wb, session, lapList, eventList);
-  buildLapsSheet(wb, lapList, sectorsList, session.sectors_count);
-  if (session.sectors_count > 0) buildSectorsSheet(wb, sectorsList, session.sectors_count);
-  buildStintsSheet(wb, lapList, eventList);
-  buildEventsSheet(wb, eventList);
-  buildSetupSheet(wb, setup);
-
-  const buffer = await wb.xlsx.writeBuffer();
+  let buffer: ExcelJS.Buffer;
+  try {
+    buildSummarySheet(wb, session, lapList, eventList);
+    buildLapsSheet(wb, lapList, sectorsList, session.sectors_count);
+    if (session.sectors_count > 0) buildSectorsSheet(wb, sectorsList, session.sectors_count);
+    buildStintsSheet(wb, lapList, eventList);
+    buildEventsSheet(wb, eventList);
+    buildSetupSheet(wb, setup);
+    buffer = await wb.xlsx.writeBuffer();
+  } catch {
+    return NextResponse.json(
+      {
+        error: template
+          ? "No se pudo rellenar esa plantilla. Prueba sin plantilla o con otro archivo."
+          : "No se pudo generar el Excel. Inténtalo de nuevo.",
+      },
+      { status: template ? 400 : 500 },
+    );
+  }
   const filename = `${slug(session.name) || "sesion"}-${session.date}.xlsx`;
 
   return new NextResponse(buffer as ArrayBuffer, {

@@ -11,13 +11,22 @@ const NOTICES: Record<string, string> = {
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string }>;
+  searchParams: Promise<{ notice?: string | string[] }>;
 }) {
-  const { notice } = await searchParams;
+  const { notice: rawNotice } = await searchParams;
+  const key = Array.isArray(rawNotice) ? rawNotice[0] : rawNotice;
+  // Solo los avisos propios: ?notice=constructor no debe colarse desde Object.
+  const notice = key && Object.hasOwn(NOTICES, key) ? NOTICES[key] : undefined;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Quien solo entra con Google o Microsoft no tiene contraseña en VRS Studio.
+  const providers = (user?.app_metadata?.providers as string[] | undefined) ?? [];
+  const hasPassword =
+    providers.includes("email") || (user?.identities ?? []).some((i) => i.provider === "email");
+  const socialName = providers.includes("google") ? "Google" : "Microsoft";
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -27,7 +36,12 @@ export default async function SettingsPage({
           Tus preferencias se guardan en tu cuenta y te siguen a cualquier dispositivo.
         </p>
       </div>
-      <SettingsPanel email={user?.email ?? ""} notice={notice ? NOTICES[notice] : undefined} />
+      <SettingsPanel
+        email={user?.email ?? ""}
+        notice={notice}
+        hasPassword={hasPassword}
+        socialName={socialName}
+      />
     </div>
   );
 }

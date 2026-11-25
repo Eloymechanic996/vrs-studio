@@ -76,7 +76,7 @@ export function SessionForm({ session }: { session?: Session }) {
       <Card>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <Field label="Nombre de la sesión" className="md:col-span-2">
-            <Input name="name" required defaultValue={initial.name} placeholder="Ej. Test privado - Mañana" autoFocus />
+            <Input name="name" required maxLength={120} defaultValue={initial.name} placeholder="Ej. Test privado - Mañana" autoFocus />
           </Field>
           <Field label="Modalidad">
             <Select name="modality" defaultValue={initial.modality} required>
@@ -97,19 +97,19 @@ export function SessionForm({ session }: { session?: Session }) {
             </Select>
           </Field>
           <Field label="Categoría">
-            <Input name="category" defaultValue={initial.category} placeholder="X30 Senior, F4..." />
+            <Input name="category" maxLength={300} defaultValue={initial.category} placeholder="X30 Senior, F4..." />
           </Field>
           <Field label="Campeonato">
-            <Input name="championship" defaultValue={initial.championship} />
+            <Input name="championship" maxLength={300} defaultValue={initial.championship} />
           </Field>
           <Field label="Equipo">
-            <Input name="team" defaultValue={initial.team} />
+            <Input name="team" maxLength={300} defaultValue={initial.team} />
           </Field>
           <Field label="Evento">
-            <Input name="event" defaultValue={initial.event} />
+            <Input name="event" maxLength={300} defaultValue={initial.event} />
           </Field>
           <Field label="Circuito">
-            <Input name="circuit" defaultValue={initial.circuit} />
+            <Input name="circuit" maxLength={300} defaultValue={initial.circuit} />
           </Field>
           <Field label="Fecha">
             <Input type="date" name="date" required defaultValue={initial.date} />
@@ -120,13 +120,13 @@ export function SessionForm({ session }: { session?: Session }) {
       <Card>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <Field label="Piloto">
-            <Input name="driver" defaultValue={initial.driver} />
+            <Input name="driver" maxLength={300} defaultValue={initial.driver} />
           </Field>
           <Field label="Chasis">
-            <Input name="chassis" defaultValue={initial.chassis} />
+            <Input name="chassis" maxLength={300} defaultValue={initial.chassis} />
           </Field>
           <Field label="Motor">
-            <Input name="engine" defaultValue={initial.engine} />
+            <Input name="engine" maxLength={300} defaultValue={initial.engine} />
           </Field>
           <Field label="Clima">
             <Select name="weather" defaultValue={initial.weather}>
@@ -148,7 +148,7 @@ export function SessionForm({ session }: { session?: Session }) {
             <Input name="sectors_count" type="number" min="0" max="10" defaultValue={initial.sectors_count} />
           </Field>
           <Field label="Notas" className="md:col-span-2">
-            <Textarea name="notes" rows={3} defaultValue={initial.notes} />
+            <Textarea name="notes" rows={3} maxLength={4000} defaultValue={initial.notes} />
           </Field>
         </CardContent>
       </Card>

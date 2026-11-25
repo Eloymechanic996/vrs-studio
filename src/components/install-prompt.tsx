@@ -30,7 +30,12 @@ function isStandalone() {
 
 function dismissedRecently() {
   if (typeof window === "undefined") return false;
-  const raw = localStorage.getItem(DISMISS_KEY);
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(DISMISS_KEY);
+  } catch {
+    // Almacenamiento bloqueado (modo privado, datos del sitio desactivados): se muestra el aviso.
+  }
   if (!raw) return false;
   const t = Number(raw);
   if (!Number.isFinite(t)) return false;

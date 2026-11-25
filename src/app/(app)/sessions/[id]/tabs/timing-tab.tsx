@@ -28,7 +28,7 @@ import {
   type MarkResult,
 } from "@/lib/stopwatch";
 import type { EventType, Lap, LapSector, Session, TrackState } from "@/lib/supabase/types";
-import { formatLapTime, parseLapTime } from "@/lib/utils";
+import { formatLapTime, lapTimeProblem, MAX_LAP_MS, parseLapTime } from "@/lib/utils";
 import { EditLapDialog } from "./edit-lap-dialog";
 import { LapTable } from "./lap-table";
 import { StopwatchDisplay } from "./stopwatch-display";
@@ -47,6 +47,9 @@ const QUICK_EVENTS: {
 
 // Fuera del componente: quickEvent solo se ejecuta al pulsar, nunca al renderizar.
 const timestamp = () => Date.now();
+
+/** Dos pulsaciones del mismo evento rápido en menos de esto son un doble toque. */
+const QUICK_EVENT_DEBOUNCE_MS = 2000;
 
 export function TimingTab({
   session,
@@ -119,6 +122,15 @@ export function TimingTab({
       toast({ message: "Pulsación ignorada: tiempo inferior al mínimo configurado." });
       return;
     }
+    if (result.kind === "lap" && result.lap.lapMs > MAX_LAP_MS) {
+      toast({
+        message:
+          "La vuelta en curso pasa de una hora: parece que el cronómetro se quedó en marcha. Ponlo a cero y vuelve a empezar.",
+        tone: "error",
+        duration: 6000,
+      });
+      return;
+    }
     commit(result.state);
     buzz();
     if (result.kind === "lap") {
@@ -132,18 +144,23 @@ export function TimingTab({
     markRef.current = mark;
   });
 
+  // Con el diálogo de editar abierto, Espacio no debe marcar vueltas por detrás.
+  const editingRef = useRef(false);
+  useEffect(() => {
+    editingRef.current = editingLap !== null;
+  }, [editingLap]);
+
   useEffect(() => {
     if (!active) return;
     function onKey(e: KeyboardEvent) {
-      if (e.code !== "Space" || e.repeat) return;
+      if (e.code !== "Space" || e.repeat || editingRef.current) return;
       const target = e.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
+      // Un desplegable con el foco (p. ej. tras elegir el estado de pista) no
+      // debe tragarse el Espacio: se le quita el foco y se marca igualmente.
+      if (target instanceof HTMLSelectElement) target.blur();
       e.preventDefault();
       if (current().runningSince !== null) markRef.current();
     }
@@ -154,24 +171,35 @@ export function TimingTab({
   function toggleRun() {
     const now = Date.now();
     const s = current();
+    if (
+      s.runningSince !== null &&
+      trackState === "Pit Lane" &&
+      !confirm(
+        "Estás en boxes: si pausas, el tiempo de la parada no se cuenta. Lo normal es dejarlo correr y pulsar Pit Out al salir. ¿Pausar de todos modos?",
+      )
+    ) {
+      return;
+    }
     commit(s.runningSince === null ? start(s, now) : pause(s, now));
   }
 
   function resetTimer() {
     const s = current();
+    const now = Date.now();
     if (
-      (s.runningSince !== null || lapElapsed(s, Date.now()) > 0) &&
+      (s.runningSince !== null || lapElapsed(s, now) > 0) &&
       !confirm("¿Parar y poner a cero la vuelta en curso? Las vueltas ya registradas no se borran.")
     ) {
       return;
     }
-    commit(reset(lastLap?.total_time_ms ?? 0));
+    commit(reset(s, lastLap?.total_time_ms ?? 0, now, MAX_LAP_MS));
   }
 
   function recordManualLap() {
     const ms = parseLapTime(manualTime);
-    if (ms === null || ms <= 0) {
-      toast({ message: "Tiempo no válido. Usa mm:ss.SSS o ss.SSS.", tone: "error" });
+    const problem = lapTimeProblem(ms, settings.minLapSeconds);
+    if (problem !== null || ms === null) {
+      toast({ message: problem ?? "Tiempo no válido.", tone: "error", duration: 5000 });
       return;
     }
     const { state: next, totalMs } = applyManualLap(
@@ -185,8 +213,20 @@ export function TimingTab({
     setManualTime("");
   }
 
+  // Último evento rápido, para ignorar dobles toques del mismo botón.
+  const lastQuick = useRef<{ type: EventType; at: number } | null>(null);
+
   function quickEvent(type: EventType, nextState: TrackState) {
     const now = timestamp();
+    if (type === "Pit In" && trackState === "Pit Lane") {
+      toast({ message: "Ya estás en boxes. Pulsa Pit Out al salir." });
+      return;
+    }
+    const prev = lastQuick.current;
+    if (prev && prev.type === type && now - prev.at < QUICK_EVENT_DEBOUNCE_MS) {
+      return;
+    }
+    lastQuick.current = { type, at: now };
     let s = current();
     if (type === "Pit Out" && s.runningSince === null) {
       s = start(s, now);
@@ -317,7 +357,11 @@ export function TimingTab({
               <Field label="Estado de pista">
                 <Select
                   value={trackState}
-                  onChange={(e) => setTrackState(e.target.value as TrackState)}
+                  onChange={(e) => {
+                    setTrackState(e.target.value as TrackState);
+                    // Suelta el foco para que el siguiente Espacio marque la vuelta.
+                    e.currentTarget.blur();
+                  }}
                 >
                   {TRACK_STATES.map((s) => (
                     <option key={s} value={s}>
@@ -330,7 +374,12 @@ export function TimingTab({
                 <Input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="Opcional"
+                  onKeyDown={(e) => {
+                    // Enter o Escape terminan la nota y devuelven el Espacio al cronómetro.
+                    if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+                  }}
+                  placeholder="Opcional · Enter para terminar"
+                  maxLength={500}
                 />
               </Field>
             </div>

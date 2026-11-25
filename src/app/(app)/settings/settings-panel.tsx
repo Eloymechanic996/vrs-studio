@@ -83,13 +83,26 @@ const DEFAULT_TEXT_FIELDS: { key: keyof UserSettings; label: string }[] = [
   { key: "defaultCircuit", label: "Circuito" },
 ];
 
-export function SettingsPanel({ email, notice }: { email: string; notice?: string }) {
+export function SettingsPanel({
+  email,
+  notice,
+  hasPassword,
+  socialName,
+}: {
+  email: string;
+  notice?: string;
+  hasPassword: boolean;
+  /** Con qué cuenta entra quien no tiene contraseña: "Google" o "Microsoft". */
+  socialName: string;
+}) {
   const { settings, update } = useSettings();
   const toast = useToast();
   const [newEmail, setNewEmail] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailSent, setEmailSent] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -99,9 +112,10 @@ export function SettingsPanel({ email, notice }: { email: string; notice?: strin
     e.preventDefault();
     startTransition(async () => {
       try {
-        const result = await changePassword(password);
+        const result = await changePassword(currentPassword, password);
         if (result.ok) {
           setPassword("");
+          setCurrentPassword("");
           setPasswordError(null);
           toast({ message: "Contraseña actualizada.", tone: "success" });
         } else {
@@ -117,10 +131,11 @@ export function SettingsPanel({ email, notice }: { email: string; notice?: strin
     e.preventDefault();
     startTransition(async () => {
       try {
-        const result = await changeEmail(newEmail);
+        const result = await changeEmail(newEmail, emailPassword);
         if (result.ok) {
           setEmailSent(newEmail.trim());
           setNewEmail("");
+          setEmailPassword("");
           setEmailError(null);
         } else {
           setEmailSent(null);
@@ -278,49 +293,80 @@ export function SettingsPanel({ email, notice }: { email: string; notice?: strin
         >
           Editar perfil de piloto y foto
         </Link>
-        <form onSubmit={submitEmail} className="flex flex-col gap-3 border-t border-border/60 pt-4">
-          <Field
-            label="Nuevo correo"
-            hint="Te enviaremos un enlace de confirmación. El cambio no se aplica hasta que lo abras."
-          >
-            <Input
-              type="email"
-              autoComplete="email"
-              required
-              maxLength={254}
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-            />
-          </Field>
-          {emailError ? <Notice tone="error">{emailError}</Notice> : null}
-          {emailSent ? (
-            <Notice tone="success">
-              Revisa la bandeja de {emailSent}
-              {" "}(y la de tu correo actual si te llega aviso) y abre el enlace para confirmar el cambio.
-            </Notice>
-          ) : null}
-          <Button type="submit" variant="secondary" disabled={pending} className="self-start">
-            <Mail className="h-4 w-4" />
-            Cambiar correo
-          </Button>
-        </form>
-        <form onSubmit={submitPassword} className="flex flex-col gap-3 border-t border-border/60 pt-4">
-          <Field label="Nueva contraseña" hint="Mínimo 8 caracteres">
-            <Input
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </Field>
-          {passwordError ? <Notice tone="error">{passwordError}</Notice> : null}
-          <Button type="submit" variant="secondary" disabled={pending} className="self-start">
-            <KeyRound className="h-4 w-4" />
-            Cambiar contraseña
-          </Button>
-        </form>
+        {!hasPassword ? (
+          <Notice tone="info">
+            Entras con tu cuenta de {socialName}: tu correo y tu contraseña se cambian en{" "}
+            {socialName}, no aquí.
+          </Notice>
+        ) : null}
+        {hasPassword ? (
+          <>
+            <form onSubmit={submitEmail} className="flex flex-col gap-3 border-t border-border/60 pt-4">
+              <Field
+                label="Nuevo correo"
+                hint="Te enviaremos un enlace de confirmación. El cambio no se aplica hasta que lo abras."
+              >
+                <Input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  maxLength={254}
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+              </Field>
+              <Field label="Tu contraseña actual">
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  maxLength={72}
+                  value={emailPassword}
+                  onChange={(e) => setEmailPassword(e.target.value)}
+                />
+              </Field>
+              {emailError ? <Notice tone="error">{emailError}</Notice> : null}
+              {emailSent ? (
+                <Notice tone="success">
+                  Revisa la bandeja de {emailSent}
+                  {" "}(y la de tu correo actual si te llega aviso) y abre el enlace para confirmar el cambio.
+                </Notice>
+              ) : null}
+              <Button type="submit" variant="secondary" disabled={pending} className="self-start">
+                <Mail className="h-4 w-4" />
+                Cambiar correo
+              </Button>
+            </form>
+            <form onSubmit={submitPassword} className="flex flex-col gap-3 border-t border-border/60 pt-4">
+              <Field label="Contraseña actual">
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  maxLength={72}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                />
+              </Field>
+              <Field label="Nueva contraseña" hint="Mínimo 8 caracteres">
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  maxLength={72}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </Field>
+              {passwordError ? <Notice tone="error">{passwordError}</Notice> : null}
+              <Button type="submit" variant="secondary" disabled={pending} className="self-start">
+                <KeyRound className="h-4 w-4" />
+                Cambiar contraseña
+              </Button>
+            </form>
+          </>
+        ) : null}
         <div className="border-t border-border/60 pt-4">
           <p className="mb-2 text-sm text-muted">
             Descarga una copia de todas tus sesiones, vueltas, eventos y setups.

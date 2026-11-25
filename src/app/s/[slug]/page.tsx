@@ -49,7 +49,10 @@ export default async function PublicSessionPage({
 
   const { data } = await supabase.rpc("get_public_session", { p_slug: slug });
   if (!data) notFound();
-  const { session, laps, events, sectors } = data as unknown as PublicSession;
+  const { session, laps: rawLaps, events, sectors } = data as unknown as PublicSession;
+  // Las notas de cada vuelta son privadas: nunca llegan al navegador de quien
+  // abre el enlace (la gráfica es de cliente y viajaría todo lo que recibe).
+  const laps = rawLaps.map((l) => ({ ...l, notes: null }));
 
   const stats = computeLapStats(laps);
   const cons = consistencyLabel(stats.cv);

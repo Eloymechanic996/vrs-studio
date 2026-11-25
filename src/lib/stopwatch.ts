@@ -45,9 +45,20 @@ export function pause(s: StopwatchState, now: number): StopwatchState {
   return { ...s, accumulated: totalElapsed(s, now), runningSince: null };
 }
 
-/** Pone a cero la vuelta en curso, sin retroceder el tiempo acumulado de la sesión. */
-export function reset(baseTotalMs: number): StopwatchState {
-  return createStopwatch(baseTotalMs);
+/**
+ * Para y pone a cero la vuelta en curso, sin retroceder el tiempo acumulado de
+ * la sesión: así los Pit In y demás eventos ya marcados siguen quedando antes
+ * que lo que se marque después. Una vuelta en curso de más de `maxLapMs`
+ * (cronómetro olvidado en marcha) solo avanza el total hasta ese máximo.
+ */
+export function reset(
+  s: StopwatchState,
+  lastTotalMs: number,
+  now: number,
+  maxLapMs = Number.POSITIVE_INFINITY,
+): StopwatchState {
+  const inProgress = Math.min(Math.max(0, lapElapsed(s, now)), maxLapMs);
+  return createStopwatch(Math.round(Math.max(lastTotalMs, s.lapMark + inProgress)));
 }
 
 export interface CompletedLap {
@@ -105,6 +116,21 @@ export function applyManualLap(
   now: number,
 ): { state: StopwatchState; totalMs: number } {
   if (s.runningSince !== null) {
+    // Vuelta olvidada: ya forma parte de la vuelta en curso, así que esta
+    // empieza a contar desde donde acabó la olvidada para no medirla dos veces.
+    if (lapMs < lapElapsed(s, now)) {
+      const mark = s.lapMark + lapMs;
+      const sectorsKept = s.sectorMark >= mark;
+      return {
+        state: {
+          ...s,
+          lapMark: mark,
+          sectorMark: sectorsKept ? s.sectorMark : mark,
+          pendingSectors: sectorsKept ? s.pendingSectors : [],
+        },
+        totalMs: Math.round(mark),
+      };
+    }
     return { state: s, totalMs: Math.max(Math.round(totalElapsed(s, now)), lastTotalMs + lapMs) };
   }
   const totalMs = Math.max(s.accumulated, lastTotalMs) + lapMs;

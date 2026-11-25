@@ -25,7 +25,25 @@ export function parseLapTime(input: string): number | null {
   const seconds = parseInt(m[2], 10);
   const millis = m[3] ? parseInt(m[3].padEnd(3, "0"), 10) : 0;
   if (seconds >= 60) return null;
-  return minutes * 60000 + seconds * 1000 + millis;
+  const ms = minutes * 60000 + seconds * 1000 + millis;
+  return ms > MAX_LAP_MS ? null : ms;
+}
+
+/** Una vuelta no puede durar más de una hora: por encima es un error al escribirla. */
+export const MAX_LAP_MS = 60 * 60 * 1000;
+
+/**
+ * Comprueba un tiempo de vuelta escrito a mano y devuelve un mensaje en
+ * español si no tiene sentido, o null si es válido.
+ */
+export function lapTimeProblem(ms: number | null, minLapSeconds: number): string | null {
+  if (ms === null || ms <= 0) {
+    return "Tiempo no válido. Usa mm:ss.SSS (ej. 01:23.456) y como máximo 60 minutos.";
+  }
+  if (ms < minLapSeconds * 1000) {
+    return `Tiempo demasiado corto (mínimo ${minLapSeconds} s). Si querías 1 min 23 s, escribe 1:23.`;
+  }
+  return null;
 }
 
 /** Interpreta una fecha `yyyy-MM-dd` en hora local, sin desplazarla por UTC. */

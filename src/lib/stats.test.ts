@@ -116,3 +116,23 @@ describe("utilidades", () => {
     expect(theoreticalBestLap([1000, null])).toBeNull();
   });
 });
+
+describe("paradas con toques de más", () => {
+  it("un doble toque en Pit In no descuadra las paradas siguientes", () => {
+    const events = [
+      ev("Pit In", 130000),
+      ev("Pit In", 130300),
+      ev("Pit Out", 160000),
+      ev("Pit In", 400000),
+      ev("Pit Out", 420000),
+    ];
+    expect(totalPitTimeMs(events)).toBe(50000);
+    const laps = [lap(1, 60000, 60000), lap(2, 70000, 130000), lap(3, 60000, 220000), lap(4, 60000, 280000), lap(5, 60000, 440000)];
+    const stints = computeStints(laps, events);
+    expect(stints.map((s) => s.pitInMs)).toEqual([null, 30000, 20000]);
+  });
+
+  it("un Pit Out sin Pit In se ignora", () => {
+    expect(totalPitTimeMs([ev("Pit Out", 1000), ev("Pit In", 5000), ev("Pit Out", 8000)])).toBe(3000);
+  });
+});

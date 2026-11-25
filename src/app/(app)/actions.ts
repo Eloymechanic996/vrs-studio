@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { AUTH_MESSAGES } from "@/lib/auth-messages";
 import { AVATAR_BUCKET } from "@/lib/profile";
 import { MODALITIES, SESSION_TYPES, TRACK_STATES, WEATHERS } from "@/lib/labels";
 import type { UserSettings } from "@/lib/settings";
@@ -15,8 +16,15 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
 const fail = (error: string): ActionResult => ({ ok: false, error });
 const OK: ActionResult = { ok: true };
 
+// Cualquier mensaje de validación que no tenga uno propio sale en español.
+z.config(z.locales.es());
+
 const id = z.string().uuid();
-const optionalText = z.string().trim().max(300).optional();
+const optionalText = z
+  .string()
+  .trim()
+  .max(300, "Cada campo de texto admite como máximo 300 caracteres.")
+  .optional();
 const lapMs = z.number().int().min(1).max(24 * 3600 * 1000);
 
 export async function signOut() {
@@ -26,7 +34,11 @@ export async function signOut() {
 }
 
 const sessionSchema = z.object({
-  name: z.string().trim().min(1, "Pon un nombre a la sesión.").max(120),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Pon un nombre a la sesión.")
+    .max(120, "El nombre de la sesión admite como máximo 120 caracteres."),
   modality: z.enum(MODALITIES as [string, ...string[]]),
   session_type: z.enum(SESSION_TYPES as [string, ...string[]]),
   category: optionalText,
@@ -41,7 +53,7 @@ const sessionSchema = z.object({
   air_temp: z.string().optional(),
   track_temp: z.string().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida."),
-  notes: z.string().trim().max(4000).optional(),
+  notes: z.string().trim().max(4000, "Las notas admiten como máximo 4000 caracteres.").optional(),
   sectors_count: z.string().optional(),
 });
 
@@ -231,7 +243,12 @@ export async function toggleSessionPublic(input: {
 }): Promise<ActionResult> {
   if (!id.safeParse(input.session_id).success) return fail("Sesión no válida.");
   const supabase = await createClient();
-  let update: { is_public: boolean; public_slug?: string } = { is_public: false };
+  // Al dejar de compartir se borra el enlace: si se vuelve a compartir, sale uno
+  // nuevo y el antiguo (que quizá circula por ahí) no revive.
+  let update: { is_public: boolean; public_slug: string | null } = {
+    is_public: false,
+    public_slug: null,
+  };
 
   if (input.make_public) {
     const { data: existing } = await supabase
@@ -355,9 +372,42 @@ export async function saveSettings(raw: UserSettings): Promise<ActionResult> {
   return OK;
 }
 
-export async function changePassword(password: string): Promise<ActionResult> {
-  if (password.length < 8) return fail("La contraseña debe tener al menos 8 caracteres.");
+/**
+ * Comprueba la contraseña actual antes de un cambio sensible: así nadie puede
+ * cambiar la contraseña o el correo desde un portátil que se quedó abierto.
+ */
+async function verifyCurrentPassword(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  currentPassword: unknown,
+): Promise<ActionResult> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.email) return fail("Tu sesión ha caducado. Vuelve a entrar.");
+  if (typeof currentPassword !== "string" || !currentPassword) {
+    return fail("Escribe tu contraseña actual.");
+  }
+  const { error } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (error) {
+    if (/rate limit/i.test(error.message)) return fail("Demasiados intentos. Espera unos minutos.");
+    return fail("La contraseña actual no es correcta.");
+  }
+  return OK;
+}
+
+export async function changePassword(currentPassword: string, password: string): Promise<ActionResult> {
+  if (typeof password !== "string" || password.length < 8) {
+    return fail("La contraseña nueva debe tener al menos 8 caracteres.");
+  }
+  if (new TextEncoder().encode(password).length > 72) {
+    return fail("La contraseña nueva admite como máximo 72 caracteres.");
+  }
   const supabase = await createClient();
+  const check = await verifyCurrentPassword(supabase, currentPassword);
+  if (!check.ok) return check;
   const { error } = await supabase.auth.updateUser({ password });
   if (error) return fail("No se pudo cambiar la contraseña. Prueba con otra diferente.");
   return OK;
@@ -422,7 +472,8 @@ export async function setAvatar(path: string | null): Promise<ActionResult> {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  if (path !== null && !new RegExp(`^${user.id}/[\\w.-]{1,100}$`).test(path)) {
+  // Solo un archivo dentro de la carpeta del usuario: nada de "." ni "..".
+  if (path !== null && !new RegExp(`^${user.id}/\\w[\\w-]{0,80}\\.(webp|png|jpe?g)$`).test(path)) {
     return fail("Foto no válida.");
   }
 
@@ -436,7 +487,7 @@ export async function setAvatar(path: string | null): Promise<ActionResult> {
   return OK;
 }
 
-export async function changeEmail(rawEmail: string): Promise<ActionResult> {
+export async function changeEmail(rawEmail: string, currentPassword: string): Promise<ActionResult> {
   const parsed = z.string().trim().toLowerCase().email().max(254).safeParse(rawEmail);
   if (!parsed.success) return fail("Escribe un correo válido.");
 
@@ -446,6 +497,8 @@ export async function changeEmail(rawEmail: string): Promise<ActionResult> {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
   if (parsed.data === user.email?.toLowerCase()) return fail("Ese ya es tu correo actual.");
+  const check = await verifyCurrentPassword(supabase, currentPassword);
+  if (!check.ok) return check;
 
   const origin = (await headers()).get("origin") ?? "";
   const { error } = await supabase.auth.updateUser(
@@ -471,5 +524,5 @@ export async function deleteAccount(confirmation: string): Promise<ActionResult>
   const { error } = await supabase.rpc("delete_own_account");
   if (error) return fail("No se pudo borrar la cuenta.");
   await supabase.auth.signOut().catch(() => {});
-  redirect(`/login?notice=${encodeURIComponent("Tu cuenta y todos tus datos se han borrado.")}`);
+  redirect(`/login?notice=${encodeURIComponent(AUTH_MESSAGES.accountDeleted)}`);
 }

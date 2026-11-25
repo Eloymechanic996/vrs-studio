@@ -1,5 +1,6 @@
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { AUTH_MESSAGES as M } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/server";
 
 /** Destino de los enlaces de los correos de confirmación y de contraseña. */
@@ -29,6 +30,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(destination);
   }
 
+  // Vuelta de Google o Microsoft con error: cancelado, bloqueado por el centro u otro fallo.
+  const oauthError = searchParams.get("error");
+  if (oauthError && !code && !tokenHash) {
+    const detail = `${searchParams.get("error_code") ?? ""} ${searchParams.get("error_description") ?? ""}`;
+    const google = searchParams.get("via") === "google";
+    const cancelled = oauthError === "access_denied";
+    destination.pathname = "/login";
+    destination.searchParams.set(
+      "error",
+      google
+        ? cancelled
+          ? M.googleCancelled
+          : M.googleFailed
+        : /consent|AADSTS65001|AADSTS90094|admin|approval/i.test(detail)
+          ? M.microsoftBlocked
+          : cancelled
+            ? M.microsoftCancelled
+            : M.microsoftFailed,
+    );
+    return NextResponse.redirect(destination);
+  }
+
   const supabase = await createClient();
   if (tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
@@ -38,21 +61,21 @@ export async function GET(request: NextRequest) {
     if (!error) return toNext();
     if (isEmailChange) {
       destination.pathname = "/login";
-      destination.searchParams.set("notice", "Correo confirmado. Inicia sesión para continuar.");
+      destination.searchParams.set("notice", M.emailConfirmedLogin);
       return NextResponse.redirect(destination);
     }
     // El enlace se abrió en otro navegador: el correo ya está confirmado, pero no hay sesión.
     if (next !== "/reset-password") {
       destination.pathname = "/login";
-      destination.searchParams.set("notice", "Cuenta confirmada. Ya puedes iniciar sesión.");
+      destination.searchParams.set("notice", M.accountConfirmed);
       return NextResponse.redirect(destination);
     }
     destination.pathname = "/login";
-    destination.searchParams.set("error", "Abre el enlace en el mismo navegador donde lo solicitaste.");
+    destination.searchParams.set("error", M.sameBrowser);
     return NextResponse.redirect(destination);
   }
 
   destination.pathname = "/login";
-  destination.searchParams.set("error", "El enlace no es válido o ha caducado. Solicita uno nuevo.");
+  destination.searchParams.set("error", M.invalidLink);
   return NextResponse.redirect(destination);
 }
