@@ -108,7 +108,13 @@ function patch(id: string, change: Partial<OutboxOp>) {
 }
 
 export function enqueue(op: OutboxOp) {
-  mutate((list) => [...list, op]);
+  enqueueMany([op]);
+}
+
+/** Añade varias operaciones de una sola vez y en orden (p. ej. una lista de vueltas pegada). */
+export function enqueueMany(ops: OutboxOp[]) {
+  if (ops.length === 0) return;
+  mutate((list) => [...list, ...ops]);
   void flushOutbox();
 }
 
@@ -172,7 +178,13 @@ async function sendOp(op: OutboxOp) {
 
 async function runFlush() {
   let sent = false;
-  for (const op of read().filter((o) => !o.synced && !o.error)) {
+  // Se vuelve a leer la cola tras cada envío: lo que se añada mientras tanto
+  // (otra vuelta marcada) sale en este mismo envío, sin esperar al siguiente.
+  const tried = new Set<string>();
+  for (;;) {
+    const op = read().find((o) => !o.synced && !o.error && !tried.has(o.id));
+    if (!op) break;
+    tried.add(op.id);
     let error: { code?: string; message?: string } | null = null;
     try {
       error = await sendOp(op);
@@ -193,7 +205,9 @@ async function runFlush() {
 export function flushOutbox(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
   if (!flushing) {
-    flushing = runFlush().finally(() => {
+    // Se marca como "enviando" antes de empezar: si durante el arranque se añade
+    // otra operación, no se lanza un segundo envío en paralelo.
+    flushing = Promise.resolve().then(runFlush).finally(() => {
       flushing = null;
     });
   }

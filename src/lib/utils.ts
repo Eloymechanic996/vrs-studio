@@ -17,7 +17,7 @@ export function formatLapTime(ms: number): string {
 
 /** Acepta `mm:ss.SSS`, `ss.SSS` o `ss,SSS`. Devuelve null si el formato no es válido. */
 export function parseLapTime(input: string): number | null {
-  const trimmed = input.trim();
+  const trimmed = normalizeLapInput(input);
   if (!trimmed) return null;
   const m = trimmed.match(/^(?:(\d+):)?(\d{1,2})(?:[.,](\d{1,3}))?$/);
   if (!m) return null;
@@ -27,6 +27,64 @@ export function parseLapTime(input: string): number | null {
   if (seconds >= 60) return null;
   const ms = minutes * 60000 + seconds * 1000 + millis;
   return ms > MAX_LAP_MS ? null : ms;
+}
+
+/**
+ * Formatos alternativos al estándar "1:23.456":
+ * - "1.23.456" o "1,23,456": el teclado numérico del móvil no tiene ":".
+ * - "1'23.456" o "1'23"456": como vienen en muchas hojas de tiempos.
+ */
+function normalizeLapInput(input: string): string {
+  let t = input.trim().replace(/[’′]/g, "'").replace(/[”″]/g, '"');
+  t = t.replace(/^(\d+)'(\d{1,2})(?:[".,](\d{1,3}))?"?$/, (_, m, s, ms) => `${m}:${s}${ms ? "." + ms : ""}`);
+  t = t.replace(/^(\d+)[.,](\d{1,2})[.,](\d{1,3})$/, "$1:$2.$3");
+  return t;
+}
+
+/** Busca el tiempo dentro de una línea pegada ("3  1:23.456", "Vuelta 3: 1'23.4", "45,123"). */
+// Sin dígitos ni ":" pegados a los lados: "2:00:00" (2 horas) no es "2:00".
+const STRONG_TIME = /(?<![\d:])(?:\d+[:'’]\d{1,2}(?:["”.,]\d{1,3})?|\d+[.,]\d{1,2}[.,]\d{1,3})(?![\d:])/g;
+const WEAK_TIME = /(?<![\d:.,])\d{1,2}[.,]\d{1,3}(?![\d:])/g;
+
+/** Máximo de vueltas que se pueden pegar de una vez. */
+export const MAX_PASTED_LAPS = 200;
+
+export type ParsedLapList = {
+  laps: { line: number; ms: number }[];
+  errors: { line: number; text: string; reason: string }[];
+  /** Líneas sin números (cabeceras como "Vuelta  Tiempo"): se ignoran sin avisar. */
+  ignored: number;
+};
+
+/**
+ * Lee una lista de tiempos pegada desde Excel, un PDF o un mensaje: una vuelta
+ * por línea. Devuelve las válidas y, por separado, las líneas con problemas.
+ */
+export function parseLapList(text: string, minLapSeconds: number): ParsedLapList {
+  const out: ParsedLapList = { laps: [], errors: [], ignored: 0 };
+  const lines = text.split(/\r?\n/);
+  lines.forEach((raw, i) => {
+    const line = i + 1;
+    const value = raw.trim();
+    if (!value) return;
+    if (!/\d/.test(value)) {
+      out.ignored++;
+      return;
+    }
+    const token = value.match(STRONG_TIME)?.[0] ?? value.match(WEAK_TIME)?.at(-1);
+    const ms = token ? parseLapTime(token) : null;
+    const problem = lapTimeProblem(ms, minLapSeconds);
+    if (problem !== null || ms === null) {
+      out.errors.push({ line, text: value.slice(0, 60), reason: problem ?? "Tiempo no válido." });
+      return;
+    }
+    if (out.laps.length >= MAX_PASTED_LAPS) {
+      out.errors.push({ line, text: value.slice(0, 60), reason: `Máximo ${MAX_PASTED_LAPS} vueltas de una vez.` });
+      return;
+    }
+    out.laps.push({ line, ms });
+  });
+  return out;
 }
 
 /** Una vuelta no puede durar más de una hora: por encima es un error al escribirla. */
