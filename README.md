@@ -4,7 +4,7 @@
 > Cronómetro con sectores, análisis de pace, comparativa entre sesiones, link
 > público para compartir, y export a Excel. PWA instalable + binario desktop.
 
-**Live:** <https://vrs-studio.vercel.app>
+**Live:** <https://virtual-racing-studio-wms.vercel.app>
 
 ---
 

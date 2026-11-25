@@ -13,7 +13,7 @@ Guía para desplegar VRS Studio desde cero en otra cuenta.
 
    Aplica las migraciones de [`supabase/migrations/`](./supabase/migrations/) en orden.
 3. En `Authentication → URL Configuration`:
-   - **Site URL:** tu dominio final (ej. `https://vrs-studio.vercel.app`).
+   - **Site URL:** tu dominio final (ej. `https://virtual-racing-studio-wms.vercel.app`).
    - **Redirect URLs:** `https://<tu-dominio>/**` y `http://localhost:3000/**`.
 
    Sin esto, los correos de confirmación apuntan a `localhost`.
