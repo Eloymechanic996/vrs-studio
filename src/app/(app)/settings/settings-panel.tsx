@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { MODALITIES, SESSION_TYPE_LABELS, SESSION_TYPES } from "@/lib/labels";
+import { CLOCK_STYLES, setClockStyle, useClockStyle } from "@/lib/clock-style";
 import { APPEARANCES, THEMES, type UserSettings } from "@/lib/settings";
 import type { Modality, SessionType } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
@@ -66,6 +67,34 @@ function Toggle({
         {hint ? <span className="block text-xs text-muted">{hint}</span> : null}
       </span>
     </label>
+  );
+}
+
+/** Estilo del reloj: se guarda en este dispositivo y también se cambia desde la sesión. */
+function ClockStylePicker() {
+  const clockStyle = useClockStyle();
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">
+        Estilo del reloj <span className="normal-case tracking-normal">(en este dispositivo)</span>
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {CLOCK_STYLES.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            aria-pressed={clockStyle === c.id}
+            onClick={() => setClockStyle(c.id)}
+            className={choiceClass(clockStyle === c.id)}
+          >
+            <span>
+              <span className="block text-sm font-semibold text-foreground">{c.name}</span>
+              <span className="block text-xs text-muted">{c.description}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -209,6 +238,7 @@ export function SettingsPanel({
       </Section>
 
       <Section icon={Timer} title="Cronómetro">
+        <ClockStylePicker />
         <Field label="Tiempo mínimo por vuelta (segundos)" hint="Evita vueltas falsas por doble toque. Usa 0 para desactivarlo.">
           <Input
             type="number"

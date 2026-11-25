@@ -44,6 +44,7 @@ import { EditLapDialog } from "./edit-lap-dialog";
 import { LapTable } from "./lap-table";
 import { ManualEntry, Segmented } from "./manual-entry";
 import { StopwatchDisplay } from "./stopwatch-display";
+import { CLOCK_STYLES, setClockStyle, useClockStyle, type ClockStyle } from "@/lib/clock-style";
 
 const QUICK_EVENTS: {
   type: EventType;
@@ -336,6 +337,7 @@ export function TimingTab({
   }
 
   const stats = computeLapStats(laps);
+  const clockStyle = useClockStyle();
   const visibleSectors = useMemo(
     () => sectors.filter((s) => !hidden.has(s.lap_id)),
     [sectors, hidden],
@@ -385,13 +387,39 @@ export function TimingTab({
           />
         ) : (
           <Card>
-            <CardHeader className="border-b-0 pb-2">
+            <CardHeader className="flex flex-row items-center justify-between gap-3 border-b-0 pb-2">
               <CardTitle className="text-xs uppercase tracking-widest text-muted">
                 Cronómetro
               </CardTitle>
+              <label className="flex items-center gap-2 text-xs text-muted">
+                <span className="hidden sm:inline">Estilo</span>
+                <Select
+                  aria-label="Estilo del cronómetro"
+                  value={clockStyle}
+                  onChange={(e) => {
+                    setClockStyle(e.target.value as ClockStyle);
+                    // Suelta el foco para que el siguiente Espacio marque la vuelta.
+                    e.currentTarget.blur();
+                  }}
+                  className="h-9 w-auto py-1 pr-8 text-xs"
+                >
+                  {CLOCK_STYLES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-5 pt-2">
-              <StopwatchDisplay state={state} useSectors={useSectors} />
+              <StopwatchDisplay
+                state={state}
+                useSectors={useSectors}
+                style={clockStyle}
+                bestMs={stats.bestMs}
+                lastLapMs={lastLap?.lap_time_ms ?? null}
+                lapNumber={(lastLap?.lap_number ?? 0) + 1}
+              />
 
               {useSectors && state.pendingSectors.length > 0 ? (
                 <div className="flex flex-wrap justify-center gap-1.5">
