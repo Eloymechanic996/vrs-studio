@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
-import { SESSION_TYPE_LABELS } from "@/lib/labels";
+import { SESSION_TYPE_LABELS, WEATHER_LABELS } from "@/lib/labels";
+import { todayISO, upcomingLabel } from "@/lib/session-dates";
+import { ConditionsCard } from "./conditions-card";
 import { ExportButtons } from "./export-buttons";
 import { SessionWorkspace } from "./session-workspace";
 import { ShareToggle } from "./share-toggle";
@@ -54,6 +56,9 @@ export default async function SessionPage({
       ? await supabase.from("lap_sectors").select("*").in("lap_id", lapIds)
       : { data: [] };
 
+  const today = todayISO();
+  const upcoming = session.date > today ? upcomingLabel(session.date, today) : null;
+
   return (
     <div className="flex flex-col gap-4">
       <RealtimeRefresher
@@ -75,6 +80,10 @@ export default async function SessionPage({
               <Badge variant="muted">{session.modality}</Badge>
               {session.circuit ? <Badge variant="info">{session.circuit}</Badge> : null}
               {session.driver ? <Badge variant="default">{session.driver}</Badge> : null}
+              {upcoming ? <Badge variant="info">Preparada · {upcoming}</Badge> : null}
+              {session.weather ? <Badge variant="muted">{WEATHER_LABELS[session.weather]}</Badge> : null}
+              {session.air_temp !== null ? <Badge variant="muted">{session.air_temp} °C aire</Badge> : null}
+              {session.track_temp !== null ? <Badge variant="muted">{session.track_temp} °C pista</Badge> : null}
               {session.sectors_count > 0 ? (
                 <Badge variant="muted">{session.sectors_count} sectores</Badge>
               ) : null}
@@ -86,6 +95,8 @@ export default async function SessionPage({
           <ExportButtons sessionId={session.id} />
         </div>
       </div>
+
+      <ConditionsCard session={session} serverToday={today} />
 
       <SessionWorkspace
         session={session}

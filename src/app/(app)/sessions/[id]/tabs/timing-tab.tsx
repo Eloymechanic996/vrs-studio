@@ -42,7 +42,8 @@ import type { EventType, Lap, LapSector, Session, TrackState } from "@/lib/supab
 import { formatLapTime, MAX_LAP_MS } from "@/lib/utils";
 import { EditLapDialog } from "./edit-lap-dialog";
 import { LapTable } from "./lap-table";
-import { ManualEntry, Segmented } from "./manual-entry";
+import { Segmented } from "@/components/ui/segmented";
+import { ManualEntry } from "./manual-entry";
 import { StopwatchDisplay } from "./stopwatch-display";
 import { CLOCK_STYLES, setClockStyle, useClockStyle, type ClockStyle } from "@/lib/clock-style";
 

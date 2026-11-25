@@ -110,6 +110,69 @@ export async function createSession(raw: SessionFormInput): Promise<ActionResult
   redirect(`/sessions/${data.id}`);
 }
 
+// Mismos límites que la base de datos (sessions_temps_range), con mensaje claro.
+const temperature = (label: string, min: number, max: number) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v) return null;
+      const n = Number(v.replace(",", "."));
+      if (!Number.isFinite(n) || n < min || n > max) {
+        ctx.addIssue({ code: "custom", message: `${label}: escribe un valor entre ${min} y ${max} °C.` });
+        return z.NEVER;
+      }
+      return Math.round(n * 10) / 10;
+    });
+
+const conditionsSchema = z.object({
+  weather: z.string().optional(),
+  air_temp: temperature("Temperatura del aire", -60, 80),
+  track_temp: temperature("Temperatura de pista", -60, 100),
+});
+
+/** Condiciones del día (clima y temperaturas), que se rellenan ya en pista. */
+export async function saveConditions(
+  sessionId: string,
+  raw: z.input<typeof conditionsSchema>,
+): Promise<ActionResult> {
+  if (!id.safeParse(sessionId).success) return fail("Sesión no válida.");
+  const parsed = conditionsSchema.safeParse(raw);
+  if (!parsed.success) return fail(parsed.error.issues[0].message);
+  const { weather, air_temp, track_temp } = parsed.data;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("sessions")
+    .update({ weather: WEATHERS.find((w) => w === weather) ?? null, air_temp, track_temp })
+    .eq("id", sessionId)
+    .select("id");
+  if (error || !data?.length) return fail("No se pudieron guardar las condiciones.");
+
+  revalidatePath("/");
+  revalidatePath(`/sessions/${sessionId}`);
+  return OK;
+}
+
+/** Sesión preparada para otro día que al final se corre hoy. */
+export async function moveSessionToToday(sessionId: string, today: string): Promise<ActionResult> {
+  if (!id.safeParse(sessionId).success || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    return fail("Sesión no válida.");
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("sessions")
+    .update({ date: today })
+    .eq("id", sessionId)
+    .select("id");
+  if (error || !data?.length) return fail("No se pudo cambiar la fecha.");
+
+  revalidatePath("/");
+  revalidatePath(`/sessions/${sessionId}`);
+  return OK;
+}
+
 export async function updateSession(sessionId: string, raw: SessionFormInput): Promise<ActionResult> {
   const parsed = sessionSchema.safeParse(raw);
   if (!id.safeParse(sessionId).success || !parsed.success) {
