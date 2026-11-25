@@ -45,7 +45,15 @@ import { LapTable } from "./lap-table";
 import { Segmented } from "@/components/ui/segmented";
 import { ManualEntry } from "./manual-entry";
 import { StopwatchDisplay } from "./stopwatch-display";
-import { CLOCK_STYLES, setClockStyle, useClockStyle, type ClockStyle } from "@/lib/clock-style";
+import {
+  CLOCK_STYLES,
+  setClockStyle,
+  setStartLights,
+  useClockStyle,
+  useStartLights,
+  type ClockStyle,
+} from "@/lib/clock-style";
+import { StartLights } from "./start-lights";
 
 const QUICK_EVENTS: {
   type: EventType;
@@ -139,6 +147,8 @@ export function TimingTab({
     saveMode(next);
   }
   const [editingLap, setEditingLap] = useState<Lap | null>(null);
+  const startLights = useStartLights();
+  const [lightsOpen, setLightsOpen] = useState(false);
 
   const { hidden, remove } = useUndoableDelete(async (lapId) => {
     const result = await deleteLap(session.id, lapId).catch(() => null);
@@ -212,8 +222,9 @@ export function TimingTab({
   const editingRef = useRef(false);
   useEffect(() => {
     // En modo manual, Espacio se escribe en los campos y no marca vueltas.
-    editingRef.current = editingLap !== null || mode === "manual";
-  }, [editingLap, mode]);
+    // Con el semáforo en pantalla, Espacio tampoco marca vueltas.
+    editingRef.current = editingLap !== null || mode === "manual" || lightsOpen;
+  }, [editingLap, mode, lightsOpen]);
 
   useEffect(() => {
     if (!active) return;
@@ -245,7 +256,20 @@ export function TimingTab({
     ) {
       return;
     }
+    // Primer arranque de la sesión con el semáforo activado: primero las luces.
+    if (s.runningSince === null && s.accumulated === 0 && startLights) {
+      setLightsOpen(true);
+      return;
+    }
     commit(s.runningSince === null ? start(s, now) : pause(s, now));
+  }
+
+  /** Se apagan las luces: el cronómetro arranca justo en ese instante. */
+  function lightsOut(at: number) {
+    const s = current();
+    if (s.runningSince === null) commit(start(s, at));
+    buzz();
+    window.setTimeout(() => setLightsOpen(false), 900);
   }
 
   function resetTimer() {
@@ -339,6 +363,7 @@ export function TimingTab({
 
   const stats = computeLapStats(laps);
   const clockStyle = useClockStyle();
+  const recentLaps = useMemo(() => laps.slice(-10).map((l) => l.lap_time_ms), [laps]);
   const visibleSectors = useMemo(
     () => sectors.filter((s) => !hidden.has(s.lap_id)),
     [sectors, hidden],
@@ -420,6 +445,9 @@ export function TimingTab({
                 bestMs={stats.bestMs}
                 lastLapMs={lastLap?.lap_time_ms ?? null}
                 lapNumber={(lastLap?.lap_number ?? 0) + 1}
+                recentLaps={recentLaps}
+                sessionName={session.name}
+                driver={session.driver}
               />
 
               {useSectors && state.pendingSectors.length > 0 ? (
@@ -511,6 +539,24 @@ export function TimingTab({
                 </Field>
               </div>
 
+              <label className="flex w-full max-w-md cursor-pointer items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 text-sm">
+                <span>
+                  <span className="font-medium">Semáforo de salida</span>
+                  <span className="block text-xs text-muted">
+                    5 luces rojas al pulsar Iniciar; el tiempo cuenta al apagarse.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={startLights}
+                  onChange={(e) => {
+                    setStartLights(e.target.checked);
+                    e.currentTarget.blur();
+                  }}
+                  className="h-5 w-5 shrink-0 accent-[var(--color-accent)]"
+                />
+              </label>
+
               <p className="hidden text-xs text-muted sm:block">
                 Atajo: pulsa{" "}
                 <kbd className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-xs">
@@ -584,6 +630,10 @@ export function TimingTab({
           </CardContent>
         </Card>
       </div>
+
+      {lightsOpen ? (
+        <StartLights onGo={lightsOut} onCancel={() => setLightsOpen(false)} />
+      ) : null}
 
       {editingLap ? (
         <EditLapDialog

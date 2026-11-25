@@ -15,6 +15,11 @@ type DisplayProps = {
   lastLapMs?: number | null;
   /** Número de la vuelta en curso. */
   lapNumber?: number;
+  /** Últimas vueltas (ms), de la más antigua a la más reciente: gráfico de telemetría. */
+  recentLaps?: number[];
+  /** Para el estilo de marca (proyector). */
+  sessionName?: string;
+  driver?: string | null;
 };
 
 const ZERO = "00:00.000";
@@ -39,6 +44,9 @@ export function StopwatchDisplay({
   bestMs = null,
   lastLapMs = null,
   lapNumber = 1,
+  recentLaps = [],
+  sessionName = "",
+  driver = null,
 }: DisplayProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const running = state.runningSince !== null;
@@ -55,6 +63,7 @@ export function StopwatchDisplay({
     const hands = all<SVGElement>("[data-hand]");
     const bars = all<HTMLElement>("[data-bar]");
     const leds = all<HTMLElement>("[data-led]");
+    const vbars = all<HTMLElement>("[data-vbar]");
 
     let frame = 0;
     const paint = () => {
@@ -91,6 +100,15 @@ export function StopwatchDisplay({
         const i = Number(led.dataset.led);
         led.dataset.on = over ? (Math.floor(now / 150) % 2 ? "1" : "0") : i < lit ? "1" : "0";
       }
+      // Barra vertical de la vuelta en curso, en la misma escala que el gráfico.
+      for (const v of vbars) {
+        const base = Number(v.dataset.base);
+        const top = Number(v.dataset.top);
+        const h = top > base ? (lap - base) / (top - base) : 0;
+        // Mínimo visible: al principio de la vuelta queda por debajo de la escala de las anteriores.
+        v.style.height = `${Math.max(0.04, Math.min(1, h)) * 100}%`;
+        v.dataset.over = bestMs && lap > bestMs ? "1" : "0";
+      }
       if (state.runningSince !== null) frame = requestAnimationFrame(paint);
     };
     paint();
@@ -110,6 +128,20 @@ export function StopwatchDisplay({
         <LedTower running={running} bestMs={bestMs} lapNumber={lapNumber} />
       ) : style === "chrono" ? (
         <Chronograph running={running} />
+      ) : style === "telemetry" ? (
+        <Telemetry running={running} bestMs={bestMs} recentLaps={recentLaps} lapNumber={lapNumber} />
+      ) : style === "night" ? (
+        <NightClock running={running} title={title} lastLapMs={lastLapMs} lastDelta={lastDelta} />
+      ) : style === "brand" ? (
+        <BrandClock
+          running={running}
+          sessionName={sessionName}
+          driver={driver}
+          lapNumber={lapNumber}
+          lastLapMs={lastLapMs}
+          bestMs={bestMs}
+          lastDelta={lastDelta}
+        />
       ) : (
         <ClassicClock running={running} title={title} />
       )}
@@ -417,5 +449,195 @@ function SubDial({
         <circle cx={cx} cy={cy} r="1.8" fill="#111827" />
       </g>
     </g>
+  );
+}
+
+// ---------------------------------------------------------------- Telemetría
+function Telemetry({
+  running,
+  bestMs,
+  recentLaps,
+  lapNumber,
+}: {
+  running: boolean;
+  bestMs: number | null;
+  recentLaps: number[];
+  lapNumber: number;
+}) {
+  // Escala común para las barras: así se ve la diferencia entre vueltas aunque sea de décimas.
+  const top = recentLaps.length ? Math.max(...recentLaps) * 1.03 : 120000;
+  const base = recentLaps.length ? Math.min(...recentLaps) * 0.9 : 0;
+  const height = (ms: number) => `${Math.max(4, ((ms - base) / (top - base)) * 100)}%`;
+  const deltas = recentLaps.slice(-3).map((ms, i, arr) => {
+    const prevIndex = recentLaps.length - arr.length + i - 1;
+    return prevIndex >= 0 ? ms - recentLaps[prevIndex] : null;
+  });
+  return (
+    <div className="mx-auto w-full max-w-lg rounded-xl border border-cyan-900/60 bg-[#020b10] p-3 font-mono text-cyan-200 sm:p-4">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.25em] text-cyan-500/80 sm:text-xs">
+        <span>Telemetría · V{lapNumber}</span>
+        <span className={running ? "text-cyan-300" : "text-zinc-500"}>{running ? "● REC" : "■ STOP"}</span>
+      </div>
+      <p className="py-1 text-center text-5xl font-bold tracking-tight text-cyan-100 sm:text-6xl">
+        <T k="main" />
+      </p>
+      {/* Gráfico: últimas vueltas + la vuelta en curso creciendo en directo. */}
+      <div
+        className="relative mt-5 flex h-28 items-end gap-1 border-b border-l border-cyan-900/80 pb-px pl-px sm:h-32"
+        aria-hidden="true"
+      >
+        {bestMs && recentLaps.length ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-fuchsia-400/70"
+            style={{ bottom: height(bestMs) }}
+          >
+            <span className="absolute -top-4 right-0 rounded bg-[#020b10] px-1 text-[9px] text-fuchsia-300">
+              MEJOR {formatLapTime(bestMs)}
+            </span>
+          </div>
+        ) : null}
+        {recentLaps.map((ms, i) => {
+          const prev = i > 0 ? recentLaps[i - 1] : null;
+          const color =
+            bestMs !== null && ms === bestMs
+              ? "bg-fuchsia-400"
+              : prev === null
+                ? "bg-cyan-600"
+                : ms <= prev
+                  ? "bg-emerald-500"
+                  : "bg-red-500";
+          return (
+            <div key={i} className={cn("flex-1 rounded-t-sm opacity-90", color)} style={{ height: height(ms) }} />
+          );
+        })}
+        <div className="relative flex h-full flex-1 items-end">
+          <div
+            data-vbar
+            data-base={base}
+            data-top={top}
+            className="w-full rounded-t-sm bg-cyan-300/80 shadow-[0_0_10px_rgba(103,232,249,.6)] data-[over='1']:bg-red-400"
+            style={{ height: "0%" }}
+          />
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-cyan-500/80 sm:text-xs">
+        <span>
+          Total <T k="total" className="text-cyan-200" />
+        </span>
+        <span className="flex gap-2">
+          {deltas.length === 0 ? <span>Sin vueltas aún</span> : null}
+          {deltas.map((d, i) => (
+            <span
+              key={i}
+              className={cn(
+                "tabular",
+                d === null ? "text-cyan-500/60" : d <= 0 ? "text-emerald-400" : "text-red-400",
+              )}
+            >
+              {d === null ? "—" : formatDelta(d)}
+            </span>
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Noche / casco
+function NightClock({
+  running,
+  title,
+  lastLapMs,
+  lastDelta,
+}: {
+  running: boolean;
+  title: string;
+  lastLapMs: number | null;
+  lastDelta: number | null;
+}) {
+  // Rojo tenue sobre negro: conserva la visión nocturna y no deslumbra dentro del casco.
+  return (
+    <div className="mx-auto w-full max-w-lg rounded-lg bg-black px-3 py-5 text-center font-mono text-[#ff3b2f]">
+      <p className="text-[10px] uppercase tracking-[0.3em] opacity-40">
+        {title} {running ? "· en marcha" : "· parado"}
+      </p>
+      <p className="py-1 text-5xl font-bold tracking-tight opacity-70 min-[400px]:text-6xl sm:text-7xl">
+        <T k="main" />
+      </p>
+      <p className="tabular text-sm opacity-40">
+        Última {lastLapMs !== null ? formatLapTime(lastLapMs) : "—"}
+        {lastDelta !== null ? ` · ${formatDelta(lastDelta)}` : ""} · Total <T k="total" />
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Marca VRS Studio
+function BrandClock({
+  running,
+  sessionName,
+  driver,
+  lapNumber,
+  lastLapMs,
+  bestMs,
+  lastDelta,
+}: {
+  running: boolean;
+  sessionName: string;
+  driver: string | null;
+  lapNumber: number;
+  lastLapMs: number | null;
+  bestMs: number | null;
+  lastDelta: number | null;
+}) {
+  const cells: [string, string, string][] = [
+    ["Última", lastLapMs !== null ? formatLapTime(lastLapMs) : "—", "text-white"],
+    [
+      "Delta",
+      lastDelta !== null ? formatDelta(lastDelta) : "—",
+      lastDelta === null ? "text-white" : lastDelta <= 0 ? "text-green-400" : "text-red-400",
+    ],
+    ["Mejor", bestMs ? formatLapTime(bestMs) : "—", "text-fuchsia-300"],
+  ];
+  return (
+    <div className="mx-auto w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-white shadow-xl">
+      <div className="h-1.5 bg-gradient-to-r from-accent via-orange-400 to-accent" />
+      <div className="flex items-center justify-between gap-3 px-4 pt-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-xs font-black text-on-accent">
+            VRS
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold sm:text-base">{sessionName || "Sesión"}</p>
+            <p className="truncate text-xs text-zinc-400">{driver || "Virtual Racing Studio"}</p>
+          </div>
+        </div>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider",
+            running ? "bg-green-500/15 text-green-400" : "bg-zinc-700/50 text-zinc-400",
+          )}
+        >
+          {running ? "● Live" : "Pausa"}
+        </span>
+      </div>
+      <div className="px-4 py-3 text-center sm:px-6">
+        <p className="text-xs uppercase tracking-[0.3em] text-zinc-400">Vuelta {lapNumber}</p>
+        <p className="text-[clamp(3rem,13vw,6.5rem)] font-black leading-none tracking-tight">
+          <T k="main" />
+        </p>
+      </div>
+      <div className="grid grid-cols-3 border-t border-white/10 text-center">
+        {cells.map(([label, value, color]) => (
+          <div key={label} className="border-r border-white/10 px-2 py-3 last:border-r-0">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-400">{label}</p>
+            <p className={cn("tabular text-base font-bold sm:text-xl", color)}>{value}</p>
+          </div>
+        ))}
+      </div>
+      <p className="pb-2 text-center text-[10px] uppercase tracking-[0.25em] text-zinc-500">
+        Total <T k="total" /> · VRS Studio
+      </p>
+    </div>
   );
 }

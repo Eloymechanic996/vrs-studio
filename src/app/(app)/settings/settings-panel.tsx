@@ -11,7 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { MODALITIES, SESSION_TYPE_LABELS, SESSION_TYPES } from "@/lib/labels";
-import { CLOCK_STYLES, setClockStyle, useClockStyle } from "@/lib/clock-style";
+import {
+  CLOCK_STYLES,
+  setClockStyle,
+  setStartLights,
+  useClockStyle,
+  useStartLights,
+} from "@/lib/clock-style";
 import { APPEARANCES, THEMES, type UserSettings } from "@/lib/settings";
 import type { Modality, SessionType } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
@@ -71,6 +77,19 @@ function Toggle({
 }
 
 /** Estilo del reloj: se guarda en este dispositivo y también se cambia desde la sesión. */
+/** Semáforo de salida: también se cambia desde la tarjeta del cronómetro. */
+function StartLightsToggle() {
+  const on = useStartLights();
+  return (
+    <Toggle
+      label="Semáforo de salida (en este dispositivo)"
+      hint="Al pulsar Iniciar se encienden 5 luces rojas; el tiempo empieza a contar al apagarse."
+      checked={on}
+      onChange={setStartLights}
+    />
+  );
+}
+
 function ClockStylePicker() {
   const clockStyle = useClockStyle();
   return (
@@ -239,6 +258,7 @@ export function SettingsPanel({
 
       <Section icon={Timer} title="Cronómetro">
         <ClockStylePicker />
+        <StartLightsToggle />
         <Field label="Tiempo mínimo por vuelta (segundos)" hint="Evita vueltas falsas por doble toque. Usa 0 para desactivarlo.">
           <Input
             type="number"
