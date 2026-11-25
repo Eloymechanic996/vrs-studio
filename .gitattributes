@@ -1,0 +1,7 @@
+# Finales de línea LF en todo el repo (evita los avisos LF/CRLF en Windows)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.xlsx binary
+*.woff2 binary
