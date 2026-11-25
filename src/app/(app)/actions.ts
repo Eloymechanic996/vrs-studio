@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AUTH_MESSAGES } from "@/lib/auth-messages";
 import { AVATAR_BUCKET } from "@/lib/profile";
 import { MODALITIES, SESSION_TYPES, TRACK_STATES, WEATHERS } from "@/lib/labels";
-import type { UserSettings } from "@/lib/settings";
+import { APPEARANCES, type AppearanceId, type UserSettings } from "@/lib/settings";
 import type { Json } from "@/lib/supabase/types";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -386,7 +386,7 @@ export async function loadSetupFrom(sessionId: string): Promise<
 // ---------------------------------------------------------------------------
 
 const settingsSchema = z.object({
-  appearance: z.enum(["racing", "lofi", "aviation", "military", "mechanic"]),
+  appearance: z.enum(APPEARANCES.map((a) => a.id) as [AppearanceId, ...AppearanceId[]]),
   theme: z.enum(["dark", "light", "auto", "sun"]),
   minLapSeconds: z.number().min(0).max(600),
   vibrate: z.boolean(),

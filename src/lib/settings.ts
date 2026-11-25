@@ -6,6 +6,12 @@ export const APPEARANCES = [
   { id: "aviation", name: "Aviación", description: "Verde instrumental y negro", swatches: ["#6b8c73", "#25352d", "#111719"] },
   { id: "military", name: "Militar", description: "Oliva, caqui y carbón", swatches: ["#65734a", "#b0a276", "#34372c"] },
   { id: "mechanic", name: "Mecánica", description: "Acero, grafito y cobre", swatches: ["#8d999d", "#41494c", "#b8784f"] },
+  { id: "retro", name: "Retro", description: "Azul celeste y naranja de los 70", swatches: ["#8fc9e8", "#f47b20", "#0d1418"] },
+  { id: "papaya", name: "Papaya", description: "Naranja papaya y azul eléctrico", swatches: ["#ff8000", "#47c7fc", "#0e0f14"] },
+  { id: "british", name: "Verde británico", description: "Verde inglés y crema", swatches: ["#1f5c3c", "#e8dcb5", "#0c1410"] },
+  { id: "rally", name: "Rally", description: "Azul profundo y amarillo", swatches: ["#1f4fd1", "#f5c400", "#0a0f1c"] },
+  { id: "neon", name: "Neón", description: "Magenta y cian, estilo simracing", swatches: ["#ff2bd6", "#22e3ff", "#0d0a1a"] },
+  { id: "carbon", name: "Carbono", description: "Fibra de carbono y amarillo", swatches: ["#facc15", "#3f3f46", "#0b0b0c"] },
 ] as const;
 
 export const THEMES = [
